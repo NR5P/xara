@@ -3,7 +3,7 @@
 //! binary as a summary, and Winlink's compressed blocks as such rather than as noise.
 
 use std::io;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::mpsc::{SyncSender, sync_channel};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::thread::{self, JoinHandle};
@@ -70,73 +70,107 @@ impl RxText {
     }
 }
 
-/// Blocks of received audio queued for the passive decoder; past this it skips audio rather
+/// Blocks of received audio queued for each passive decoder; past this it skips audio rather
 /// than hold up the modem.
 const PASSIVE_QUEUE: usize = 200;
 
-/// Decodes everyone's VARA HF traffic on the channel, as xara-monitor does, on its own thread.
-pub struct Passive {
+/// Bandwidths the passive decoder always listens at; the modem's own is added. 2750 Hz needs
+/// registered VARA and costs the most to decode, so it is only searched when the modem uses it.
+const PASSIVE_BWS: [Bandwidth; 2] = [Bandwidth::Hz500, Bandwidth::Hz2300];
+
+/// One decoder thread for one bandwidth.
+struct Decoder {
+    bw: Bandwidth,
     tx: Option<SyncSender<Vec<f64>>>,
     worker: Option<JoinHandle<()>>,
+    dropped: AtomicUsize,
+}
+
+/// Decodes everyone's VARA HF traffic on the channel, as xara-monitor does, at each common
+/// bandwidth at once: a link is only readable by a decoder at its own bandwidth.
+pub struct Passive {
+    decoders: Vec<Decoder>,
 }
 
 impl Passive {
     /// `calls` are stations to name when heard: VARA sends the answerer's call only as a hash,
     /// which shows as #XXXXXX unless the call is known.
     pub fn spawn(bw: Bandwidth, calls: &[String]) -> io::Result<Self> {
-        let (tx, rx) = sync_channel::<Vec<f64>>(PASSIVE_QUEUE);
+        let mut bws: Vec<Bandwidth> = PASSIVE_BWS.to_vec();
+        if !bws.contains(&bw) {
+            bws.push(bw);
+        }
         let opts = MonitorOpts { calls: calls.to_vec(), ..MonitorOpts::default() };
-        let worker = thread::Builder::new().name("passive".into()).spawn(move || {
-            let mut m = Monitor::new(bw, &opts);
-            let mut heard = Heard::default();
-            let mut drain = |m: &mut Monitor| {
-                while let Some(l) = m.pop() {
-                    if let Some(s) = heard.line(&l.rec) {
-                        emit(|| s);
+        let mut decoders = Vec::new();
+        for (i, &b) in bws.iter().enumerate() {
+            let (tx, rx) = sync_channel::<Vec<f64>>(PASSIVE_QUEUE);
+            let opts = opts.clone();
+            // CQs decode at any bandwidth, so only the first decoder shows them.
+            let mut heard = Heard { bw: b, cq: i == 0, winlink: false };
+            let worker = thread::Builder::new().name(format!("passive-{}", b.hz())).spawn(move || {
+                let mut m = Monitor::new(b, &opts);
+                let mut drain = |m: &mut Monitor| {
+                    while let Some(l) = m.pop() {
+                        if let Some(s) = heard.line(&l.rec) {
+                            emit(|| s);
+                        }
                     }
+                };
+                for x in rx {
+                    m.feed(&x);
+                    drain(&mut m);
                 }
-            };
-            for x in rx {
-                m.feed(&x);
+                m.finish();
                 drain(&mut m);
-            }
-            m.finish();
-            drain(&mut m);
-        })?;
-        emit(|| "— showing other stations' traffic —\n".into());
-        Ok(Self { tx: Some(tx), worker: Some(worker) })
+            })?;
+            decoders.push(Decoder { bw: b, tx: Some(tx), worker: Some(worker), dropped: AtomicUsize::new(0) });
+        }
+        let hz: Vec<String> = bws.iter().map(|b| b.hz().to_string()).collect();
+        emit(|| format!("— showing other stations' traffic ({} Hz) —\n", hz.join(", ")));
+        Ok(Self { decoders })
     }
 
-    /// Queues one block of live audio; drops it if the decoder has fallen behind.
+    /// Queues one block of live audio; a decoder that has fallen behind skips it.
     pub fn feed(&self, x: &[f64]) {
-        // A full queue drops the block: the decoder resumes from the next, losing a frame at most.
-        if let Some(tx) = &self.tx {
-            let _ = tx.try_send(x.to_vec());
+        for d in &self.decoders {
+            let Some(tx) = &d.tx else { continue };
+            if tx.try_send(x.to_vec()).is_err() {
+                let n = d.dropped.fetch_add(1, Ordering::Relaxed);
+                // Once, then about every 10 s of skipped audio.
+                if n % 1000 == 0 {
+                    crate::say!("passive decoder at {} Hz can't keep up; skipping audio", d.bw.hz());
+                }
+            }
         }
     }
-}
 
-impl Passive {
     /// Queues one block, waiting for room: for input faster than real time, such as a file.
     pub fn feed_wait(&self, x: &[f64]) {
-        if let Some(tx) = &self.tx {
-            let _ = tx.send(x.to_vec());
+        for d in &self.decoders {
+            if let Some(tx) = &d.tx {
+                let _ = tx.send(x.to_vec());
+            }
         }
     }
 }
 
 impl Drop for Passive {
     fn drop(&mut self) {
-        self.tx.take();
-        if let Some(w) = self.worker.take() {
-            let _ = w.join();
+        for d in &mut self.decoders {
+            d.tx.take();
+        }
+        for d in &mut self.decoders {
+            if let Some(w) = d.worker.take() {
+                let _ = w.join();
+            }
         }
     }
 }
 
 /// Turns the passive decoder's records into readout text, keeping only what a person reads.
-#[derive(Default)]
 struct Heard {
+    bw: Bandwidth,
+    cq: bool,
     winlink: bool,
 }
 
@@ -146,7 +180,7 @@ impl Heard {
         match r {
             Record::Header { call, answerer, .. } if !own => {
                 self.winlink = false;
-                Some(format!("— heard {call} → {answerer} —\n"))
+                Some(format!("— heard {call} → {answerer} ({} Hz) —\n", self.bw.hz()))
             }
             Record::Payload { body: Body::Data { data, .. }, .. } if !own => {
                 let head = String::from_utf8_lossy(&data[..data.len().min(256)]);
@@ -158,7 +192,7 @@ impl Heard {
             Record::LinkEnd { caller, answerer, why, .. } if !own => {
                 Some(format!("— {caller} → {answerer} ended ({why}) —\n"))
             }
-            Record::Cq { line, .. } => Some(format!("{line}\n")),
+            Record::Cq { line, .. } if self.cq => Some(format!("{line}\n")),
             _ => None,
         }
     }
