@@ -102,7 +102,9 @@ impl Ptt for Vox {
 
 #[cfg(target_os = "linux")]
 type IoctlReq = libc::Ioctl;
-#[cfg(not(target_os = "linux"))]
+#[cfg(target_os = "android")]
+type IoctlReq = libc::c_int;
+#[cfg(not(any(target_os = "linux", target_os = "android")))]
 type IoctlReq = libc::c_ulong;
 
 pub struct Serial {

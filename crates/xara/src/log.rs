@@ -1,5 +1,4 @@
 use std::fmt;
-use std::io::Write;
 use std::sync::OnceLock;
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -15,7 +14,7 @@ pub fn write(info: bool, args: fmt::Arguments) {
     if info && QUIET.load(Ordering::Relaxed) {
         return;
     }
-    let _ = writeln!(std::io::stderr().lock(), "{}: {args}", NAME.get().copied().unwrap_or("xara"));
+    xara_host::log::line(format_args!("{}: {args}", NAME.get().copied().unwrap_or("xara")));
 }
 
 #[macro_export]

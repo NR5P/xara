@@ -427,7 +427,7 @@ fn run(
         Some(bw) => format!("FM {bw:?}"),
         None => format!("{} Hz", a.bw.hz()),
     };
-    eprintln!(
+    xara_host::log::line(format_args!(
         "xara {}: {} {mode}, cmd {} data {}, {} -> {}",
         env!("CARGO_PKG_VERSION"),
         a.call,
@@ -435,7 +435,7 @@ fn run(
         host.data_addr,
         a.capture,
         a.playback
-    );
+    ));
     match a.fm {
         Some(bw) => {
             let mut cfg = fm::Config::new(bw, &a.call);
@@ -679,7 +679,7 @@ fn session(cmdline: &[String], stop: &Arc<AtomicBool>, inherited: Option<String>
     let (config, argv) = match with_config(cmdline) {
         Ok(c) => c,
         Err(e) => {
-            eprintln!("{e}");
+            xara_host::log::line(format_args!("{e}"));
             return Ok(Done::Exit(2));
         }
     };
@@ -690,7 +690,7 @@ fn session(cmdline: &[String], stop: &Arc<AtomicBool>, inherited: Option<String>
         Ok(Some(a)) => a,
         Ok(None) => return Ok(Done::Exit(0)),
         Err(e) => {
-            eprintln!("{e}\n{}\nsee {} --help", USAGE.synopsis, USAGE.name);
+            xara_host::log::line(format_args!("{e}\n{}\nsee {} --help", USAGE.synopsis, USAGE.name));
             return Ok(Done::Exit(2));
         }
     };

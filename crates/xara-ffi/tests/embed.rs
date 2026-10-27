@@ -16,7 +16,8 @@ fn logged(want: &str, within: Duration) -> bool {
     false
 }
 
-fn main() {
+#[test]
+fn bad_options_stop_the_modem_with_status_2_and_one_runs_at_a_time() {
     let m = xara_ffi::start(args("--call N0CALL --capture c --playback p")).unwrap();
     assert!(logged("N0CALL is not a callsign", Duration::from_secs(5)));
     let t0 = Instant::now();

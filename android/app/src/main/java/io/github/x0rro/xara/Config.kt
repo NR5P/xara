@@ -1,0 +1,139 @@
+package io.github.x0rro.xara
+
+import android.content.Context
+import android.media.AudioDeviceInfo
+import android.media.AudioManager
+import java.io.File
+import java.net.Inet4Address
+import java.net.NetworkInterface
+import java.security.SecureRandom
+
+enum class Mode(val label: String, val options: List<String>) {
+    HF500("HF 500 Hz", listOf("--hf", "500")),
+    HF2300("HF 2300 Hz", listOf("--hf", "2300")),
+    HF2750("HF 2750 Hz", listOf("--hf", "2750")),
+    FM_NARROW("FM narrow", listOf("--fm", "narrow")),
+    FM_WIDE("FM wide", listOf("--fm", "wide")),
+}
+
+enum class Ptt { VOX, RIGCTLD }
+
+const val COMMAND_PORT = 8300
+const val KISS_PORT = 8100
+const val UI_PORT = 8080
+
+/** What the app asks xara to run as; turned into the same options the `xara` command takes. */
+data class ModemConfig(
+    val call: String,
+    val mode: Mode,
+    val ptt: Ptt,
+    val rigctld: String,
+    val driveDb: Int,
+    val lan: Boolean,
+    val uiControl: Boolean,
+    val uiToken: String,
+    val capture: Int,
+    val playback: Int,
+    val stateDir: File,
+) {
+    val callValid: Boolean
+        get() = call.uppercase().matches(Regex("^[A-Z0-9]{3,7}(-[0-9]{1,2})?$")) && !call.uppercase().startsWith("N0CALL")
+
+    fun arguments(): Array<String> {
+        val bind = if (lan) "0.0.0.0" else "127.0.0.1"
+        val a = mutableListOf("--call", call.uppercase())
+        a += mode.options
+        a += listOf("--audio", "aaudio", "--capture", "$capture", "--playback", "$playback", "--radio")
+        a += listOf("--ptt", if (ptt == Ptt.VOX) "vox" else "rigctld:$rigctld")
+        a += listOf("--drive-db", "$driveDb")
+        a += listOf("--addr", bind, "--port", "$COMMAND_PORT", "--kiss-port", "$KISS_PORT")
+        a += listOf("--ui-port", "$UI_PORT", "--ui-addr", bind)
+        if (uiControl) a += listOf("--ui-control", "--ui-token", uiToken)
+        a += listOf("--state-dir", stateDir.path)
+        return a.toTypedArray()
+    }
+}
+
+/** Settings kept across launches. */
+class Prefs(context: Context) {
+    private val p = context.getSharedPreferences("xara", Context.MODE_PRIVATE)
+    private val stateDir = File(context.filesDir, "xara")
+
+    var call by string("call", "")
+    var mode by string("mode", Mode.HF2300.name)
+    var ptt by string("ptt", Ptt.VOX.name)
+    var rigctld by string("rigctld", "192.168.1.10:4532")
+    var driveDb by int("driveDb", -5)
+    var lan by bool("lan", false)
+    var uiControl by bool("uiControl", false)
+    var allowBuiltIn by bool("allowBuiltIn", false)
+    var capture by int("capture", 0)
+    var playback by int("playback", 0)
+
+    /** A token kept across launches, so a bookmarked controlling web UI keeps working. */
+    val uiToken: String
+        get() = p.getString("uiToken", null) ?: run {
+            val chars = ('A'..'Z') + ('a'..'z') + ('0'..'9')
+            val r = SecureRandom()
+            String(CharArray(32) { chars[r.nextInt(chars.size)] }).also { p.edit().putString("uiToken", it).apply() }
+        }
+
+    fun config() = ModemConfig(
+        call, Mode.valueOf(mode), Ptt.valueOf(ptt), rigctld, driveDb, lan, uiControl, uiToken,
+        capture, playback, stateDir,
+    )
+
+    private fun string(k: String, d: String) = object : kotlin.properties.ReadWriteProperty<Any?, String> {
+        override fun getValue(thisRef: Any?, property: kotlin.reflect.KProperty<*>) = p.getString(k, d) ?: d
+        override fun setValue(thisRef: Any?, property: kotlin.reflect.KProperty<*>, value: String) =
+            p.edit().putString(k, value).apply()
+    }
+
+    private fun int(k: String, d: Int) = object : kotlin.properties.ReadWriteProperty<Any?, Int> {
+        override fun getValue(thisRef: Any?, property: kotlin.reflect.KProperty<*>) = p.getInt(k, d)
+        override fun setValue(thisRef: Any?, property: kotlin.reflect.KProperty<*>, value: Int) =
+            p.edit().putInt(k, value).apply()
+    }
+
+    private fun bool(k: String, d: Boolean) = object : kotlin.properties.ReadWriteProperty<Any?, Boolean> {
+        override fun getValue(thisRef: Any?, property: kotlin.reflect.KProperty<*>) = p.getBoolean(k, d)
+        override fun setValue(thisRef: Any?, property: kotlin.reflect.KProperty<*>, value: Boolean) =
+            p.edit().putBoolean(k, value).apply()
+    }
+}
+
+/** An audio device as the app offers it; xara opens it by id. */
+data class Device(val id: Int, val label: String, val builtIn: Boolean, val usb: Boolean)
+
+object AudioDevices {
+    private val builtInTypes = setOf(
+        AudioDeviceInfo.TYPE_BUILTIN_SPEAKER, AudioDeviceInfo.TYPE_BUILTIN_EARPIECE,
+        AudioDeviceInfo.TYPE_BUILTIN_MIC, AudioDeviceInfo.TYPE_TELEPHONY,
+    )
+    private val usbTypes = setOf(
+        AudioDeviceInfo.TYPE_USB_DEVICE, AudioDeviceInfo.TYPE_USB_HEADSET, AudioDeviceInfo.TYPE_USB_ACCESSORY,
+    )
+
+    fun list(context: Context, inputs: Boolean): List<Device> {
+        val am = context.getSystemService(AudioManager::class.java)
+        val flag = if (inputs) AudioManager.GET_DEVICES_INPUTS else AudioManager.GET_DEVICES_OUTPUTS
+        return am.getDevices(flag).map {
+            val kind = when {
+                it.type in usbTypes -> "USB"
+                it.type in builtInTypes -> "built-in"
+                else -> "type ${it.type}"
+            }
+            Device(it.id, "${it.productName} ($kind)", it.type in builtInTypes, it.type in usbTypes)
+        }
+    }
+}
+
+/** This device's IPv4 addresses, for clients on the LAN. */
+fun lanAddresses(): List<String> = runCatching {
+    NetworkInterface.getNetworkInterfaces().toList()
+        .filter { it.isUp && !it.isLoopback }
+        .flatMap { it.inetAddresses.toList() }
+        .filterIsInstance<Inet4Address>()
+        .map { it.hostAddress ?: "" }
+        .filter { it.isNotEmpty() }
+}.getOrDefault(emptyList())
