@@ -63,6 +63,7 @@ struct ModemConfig {
     var uiControl: Bool { Self.defaults.bool(forKey: "uiControl") }
     var monitor: Bool { Self.defaults.bool(forKey: "monitor") }
     var monitorCalls: [String] { calls(Self.defaults.string(forKey: "monitorCalls") ?? "") }
+    var monitorFrames: Bool { Self.defaults.bool(forKey: "monitorFrames") }
 
     static var callValid: Bool {
         let c = ModemConfig().call.uppercased()
@@ -92,6 +93,7 @@ struct ModemConfig {
         if uiControl { a += ["--ui-control", "--ui-token", UiToken.value] }
         if monitor && mode.isHF {
             a += ["--monitor"]
+            if monitorFrames { a += ["--monitor-frames"] }
             for c in monitorCalls { a += ["--monitor-call", c] }
         }
         a += ["--state-dir", Self.stateDir.path]

@@ -48,6 +48,10 @@ struct ModemConfig {
     var stateDir: URL
     var monitor = false
     var monitorCalls: [String] = []
+    /// Show every frame heard, not just links, text and CQs.
+    var monitorFrames = false
+    /// A FLAC recording of the radio's audio (and what xara sends), for troubleshooting.
+    var record: URL?
 
     var arguments: [String] {
         var a = ["--call", call.uppercased()] + mode.options
@@ -60,8 +64,10 @@ struct ModemConfig {
         if uiControl { a += ["--ui-control", "--ui-token", uiToken] }
         if monitor && mode.isHF {
             a += ["--monitor"]
+            if monitorFrames { a += ["--monitor-frames"] }
             for c in monitorCalls { a += ["--monitor-call", c] }
         }
+        if let r = record { a += ["--record", r.path] }
         a += ["--state-dir", stateDir.path]
         return a
     }

@@ -13,7 +13,9 @@ enum class Mode(val label: String, val options: List<String>) {
     HF2300("HF 2300 Hz", listOf("--hf", "2300")),
     HF2750("HF 2750 Hz", listOf("--hf", "2750")),
     FM_NARROW("FM narrow", listOf("--fm", "narrow")),
-    FM_WIDE("FM wide", listOf("--fm", "wide")),
+    FM_WIDE("FM wide", listOf("--fm", "wide"));
+
+    val isHF: Boolean get() = this == HF500 || this == HF2300 || this == HF2750
 }
 
 enum class Ptt { VOX, RIGCTLD }
@@ -35,6 +37,9 @@ data class ModemConfig(
     val capture: Int,
     val playback: Int,
     val stateDir: File,
+    val monitor: Boolean = false,
+    val monitorFrames: Boolean = false,
+    val monitorCalls: List<String> = emptyList(),
 ) {
     val callValid: Boolean
         get() = call.uppercase().matches(Regex("^[A-Z0-9]{3,7}(-[0-9]{1,2})?$")) && !call.uppercase().startsWith("N0CALL")
@@ -49,6 +54,11 @@ data class ModemConfig(
         a += listOf("--addr", bind, "--port", "$COMMAND_PORT", "--kiss-port", "$KISS_PORT")
         a += listOf("--ui-port", "$UI_PORT", "--ui-addr", bind)
         if (uiControl) a += listOf("--ui-control", "--ui-token", uiToken)
+        if (monitor && mode.isHF) {
+            a += "--monitor"
+            if (monitorFrames) a += "--monitor-frames"
+            monitorCalls.forEach { a += listOf("--monitor-call", it) }
+        }
         a += listOf("--state-dir", stateDir.path)
         return a.toTypedArray()
     }
@@ -69,6 +79,9 @@ class Prefs(context: Context) {
     var allowBuiltIn by bool("allowBuiltIn", false)
     var capture by int("capture", 0)
     var playback by int("playback", 0)
+    var monitor by bool("monitor", false)
+    var monitorFrames by bool("monitorFrames", false)
+    var monitorCalls by string("monitorCalls", "")
 
     /** A token kept across launches, so a bookmarked controlling web UI keeps working. */
     val uiToken: String
@@ -80,7 +93,8 @@ class Prefs(context: Context) {
 
     fun config() = ModemConfig(
         call, Mode.valueOf(mode), Ptt.valueOf(ptt), rigctld, driveDb, lan, uiControl, uiToken,
-        capture, playback, stateDir,
+        capture, playback, stateDir, monitor, monitorFrames,
+        monitorCalls.uppercase().split(' ', ',').filter { it.isNotBlank() },
     )
 
     private fun string(k: String, d: String) = object : kotlin.properties.ReadWriteProperty<Any?, String> {

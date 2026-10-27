@@ -59,6 +59,7 @@ struct Args {
     record: Option<PathBuf>,
     hf_given: bool,
     monitor: bool,
+    monitor_frames: bool,
     heard: Vec<String>,
 }
 
@@ -94,6 +95,7 @@ fn defaults() -> Args {
         record: None,
         hf_given: false,
         monitor: false,
+        monitor_frames: false,
         heard: Vec::new(),
     }
 }
@@ -151,6 +153,7 @@ fn take(a: &mut Args, k: &str, mut v: impl FnMut() -> Result<String, String>) ->
         "--ptt-max-s" => a.timing.max_on = Duration::from_secs(num(k, &v()?)?),
         "--record" => a.record = Some(PathBuf::from(v()?)),
         "--monitor" => a.monitor = true,
+        "--monitor-frames" => a.monitor_frames = true,
         "--monitor-call" => a.heard.push(cli::call(&v()?)?),
         #[cfg(feature = "registered")]
         "--registered" => a.registered = true,
@@ -208,6 +211,9 @@ fn check(a: &Args) -> Result<(), String> {
     }
     if a.hf_given && a.fm.is_some() {
         return Err("--hf and --fm cannot both be given".into());
+    }
+    if a.monitor_frames && !a.monitor {
+        return Err("--monitor-frames needs --monitor".into());
     }
     if a.monitor && a.fm.is_some() {
         return Err("--monitor decodes VARA HF; it is not available with --fm".into());
@@ -510,7 +516,11 @@ fn serve<M: Modem>(
         crate::rxtext::set_sink(|s| print!("{s}"));
     }
     let passive = match a.monitor {
-        true => Some(crate::rxtext::Passive::spawn(a.bw, &[&[a.call.clone()][..], &a.heard][..].concat())?),
+        true => Some(crate::rxtext::Passive::spawn(
+            a.bw,
+            &[&[a.call.clone()][..], &a.heard][..].concat(),
+            a.monitor_frames,
+        )?),
         false => None,
     };
     let pumped = pump(a, io.as_mut(), stop, rec, |x, out, forced| {

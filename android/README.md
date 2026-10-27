@@ -6,6 +6,9 @@ with a small Jetpack Compose app around it:
 
  - **Modem**: call sign, HF/FM mode, TX drive, audio in/out, PTT, start/stop
  - **Web UI**: xara's own web UI (waterfall, levels, status) in a web view
+ - **Received**: what the modem receives, as text; turn on *Show other
+   stations' traffic* to also decode VARA HF traffic between other stations,
+   showing just the text or every packet heard
  - **Log**: everything xara logs
 
 the usual VARA ports are open while it runs: command 8300, data 8301,

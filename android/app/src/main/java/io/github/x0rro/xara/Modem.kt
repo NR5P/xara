@@ -29,6 +29,10 @@ object Modem {
     val status = MutableStateFlow("Stopped")
     private val _log = MutableStateFlow<List<String>>(emptyList())
     val log: StateFlow<List<String>> = _log
+    private val _received = MutableStateFlow("")
+
+    /** What the modem received, as readable text, appended as it arrives. */
+    val received: StateFlow<String> = _received
 
     init {
         scope.launch {
@@ -81,10 +85,16 @@ object Modem {
     private fun drainLog() {
         val got = generateSequence { Native.nextLog() }.toList()
         if (got.isNotEmpty()) _log.value = (_log.value + got).takeLast(2000)
+        val rx = generateSequence { Native.nextReceived() }.joinToString("")
+        if (rx.isNotEmpty()) _received.value = (_received.value + rx).takeLast(200_000)
     }
 
     fun clearLog() {
         _log.value = emptyList()
+    }
+
+    fun clearReceived() {
+        _received.value = ""
     }
 }
 

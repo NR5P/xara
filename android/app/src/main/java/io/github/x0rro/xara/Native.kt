@@ -19,4 +19,7 @@ object Native {
 
     /** The next line xara logged, or null. */
     external fun nextLog(): String?
+
+    /** The next piece of what the modem received, as readable text, or null. */
+    external fun nextReceived(): String?
 }

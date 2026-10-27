@@ -12,6 +12,8 @@ struct ModemView: View {
     @AppStorage("uiControl") private var uiControl = false
     @AppStorage("monitor") private var monitor = false
     @AppStorage("monitorCalls") private var monitorCalls = ""
+    @AppStorage("recordAudio") private var recordAudio = false
+    @AppStorage("monitorFrames") private var monitorFrames = false
     @AppStorage("allowBuiltIn") private var allowBuiltIn = false
     @State private var addresses: [String] = []
 
@@ -73,18 +75,19 @@ struct ModemView: View {
                     Toggle("Show other stations' traffic", isOn: $monitor)
                         .disabled(!mode.isHF)
                     if monitor && mode.isHF {
+                        Picker("Show", selection: $monitorFrames) {
+                            Text("Text only").tag(false)
+                            Text("Every packet").tag(true)
+                        }
                         TextField("Calls to name (optional)", text: $monitorCalls)
                             .textInputAutocapitalization(.characters)
                             .autocorrectionDisabled()
                     }
+                    Toggle("Record received audio", isOn: $recordAudio)
                 } header: {
                     Text("Receive")
                 } footer: {
-                    Text(mode.isHF
-                        ? "The Received tab always shows your own links. With this on it also decodes VARA HF "
-                            + "traffic between other stations, like VARA's monitor. Answering stations show as "
-                            + "#hash unless their call is listed above."
-                        : "Showing other stations' traffic is for VARA HF; FM shows your own links only.")
+                    Text(receiveFooter)
                 }
                 .disabled(modem.running)
                 Section {
@@ -105,6 +108,17 @@ struct ModemView: View {
         }
     }
 
+    private var receiveFooter: String {
+        let monitorNote = mode.isHF
+            ? "The Received tab always shows your own links. With this on it also decodes VARA HF traffic "
+                + "between other stations, like VARA's monitor. Answering stations show as #hash unless their "
+                + "call is listed above. Every packet lists each frame heard, as VARA's monitor does."
+            : "Showing other stations' traffic is for VARA HF; FM shows your own links only."
+        let recordNote = " Recording saves the radio's audio while the modem runs (about 3 MB a minute) to "
+            + "Files › On My iPhone › xara, for troubleshooting decoding."
+        return monitorNote + (recordAudio ? recordNote : "")
+    }
+
     private var clientsFooter: String {
         let p = ModemConfig.commandPort, k = ModemConfig.kissPort
         guard lan else {
@@ -120,7 +134,8 @@ struct ModemView: View {
         ModemConfig(
             call: call, mode: mode, ptt: ptt, rigctld: rigctld, driveDb: driveDb, lan: lan,
             uiControl: uiControl, uiToken: UiToken.value, stateDir: UiToken.stateDir,
-            monitor: monitor, monitorCalls: calls(monitorCalls))
+            monitor: monitor, monitorCalls: calls(monitorCalls), monitorFrames: monitorFrames,
+            record: recordAudio ? Recordings.next() : nil)
     }
 }
 
@@ -196,6 +211,16 @@ struct WebView: UIViewRepresentable {
             context.coordinator.loaded = (url, reload)
             w.load(URLRequest(url: url))
         }
+    }
+}
+
+enum Recordings {
+    /// A new file in the app's Documents folder, which the Files app shows under xara.
+    static func next() -> URL {
+        let f = DateFormatter()
+        f.dateFormat = "yyyyMMdd-HHmmss"
+        let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        return docs.appendingPathComponent("xara-\(f.string(from: Date())).flac")
     }
 }
 

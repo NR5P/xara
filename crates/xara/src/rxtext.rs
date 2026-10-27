@@ -9,7 +9,7 @@ use std::sync::{Arc, Mutex, PoisonError};
 use std::thread::{self, JoinHandle};
 
 use crate::monitor::record::{Body, Record};
-use crate::monitor::{Monitor, MonitorOpts};
+use crate::monitor::{Line, Monitor, MonitorOpts};
 use xara_phy::hf::level::Bandwidth;
 
 type Sink = Arc<dyn Fn(&str) + Send + Sync>;
@@ -17,6 +17,11 @@ type Sink = Arc<dyn Fn(&str) + Send + Sync>;
 static SINK: Mutex<Option<Sink>> = Mutex::new(None);
 /// Set while this station has a link, so the passive decoder doesn't repeat its data.
 static OWN_LINK: AtomicBool = AtomicBool::new(false);
+/// Data bursts the passive decoders heard and frames they decoded, across all bandwidths.
+static BURSTS: AtomicUsize = AtomicUsize::new(0);
+static DECODED: AtomicUsize = AtomicUsize::new(0);
+/// How often to say so when VARA data is heard but none of it decodes.
+const UNDECODED_REPORT: std::time::Duration = std::time::Duration::from_secs(120);
 
 /// Sends each rendered piece of received data to `f`. Without a sink nothing is rendered.
 pub fn set_sink(f: impl Fn(&str) + Send + Sync + 'static) {
@@ -95,33 +100,57 @@ pub struct Passive {
 impl Passive {
     /// `calls` are stations to name when heard: VARA sends the answerer's call only as a hash,
     /// which shows as #XXXXXX unless the call is known.
-    pub fn spawn(bw: Bandwidth, calls: &[String]) -> io::Result<Self> {
+    /// With `frames`, every frame the decoders hear is shown, not just links, text and CQs.
+    pub fn spawn(bw: Bandwidth, calls: &[String], frames: bool) -> io::Result<Self> {
         let mut bws: Vec<Bandwidth> = PASSIVE_BWS.to_vec();
         if !bws.contains(&bw) {
             bws.push(bw);
         }
         let opts = MonitorOpts { calls: calls.to_vec(), ..MonitorOpts::default() };
         let mut decoders = Vec::new();
+        let bws_n = bws.len().max(1);
         for (i, &b) in bws.iter().enumerate() {
             let (tx, rx) = sync_channel::<Vec<f64>>(PASSIVE_QUEUE);
             let opts = opts.clone();
             // CQs decode at any bandwidth, so only the first decoder shows them.
-            let mut heard = Heard { bw: b, cq: i == 0, winlink: false };
+            let mut heard = Heard { bw: b, first: i == 0, frames, winlink: false, pending: Vec::new() };
             let worker = thread::Builder::new().name(format!("passive-{}", b.hz())).spawn(move || {
                 let mut m = Monitor::new(b, &opts);
                 let mut drain = |m: &mut Monitor| {
                     while let Some(l) = m.pop() {
-                        if let Some(s) = heard.line(&l.rec) {
+                        if let Some(s) = heard.line(&l) {
                             emit(|| s);
                         }
                     }
+                    heard.flush(false);
                 };
+                let mut report = std::time::Instant::now() + UNDECODED_REPORT;
+                let mut last = (BURSTS.load(Ordering::SeqCst), DECODED.load(Ordering::SeqCst));
                 for x in rx {
                     m.feed(&x);
                     drain(&mut m);
+                    // The first decoder speaks for all of them, so a burst at another bandwidth
+                    // that one of them decoded does not count as undecoded.
+                    if i == 0 && std::time::Instant::now() >= report {
+                        report += UNDECODED_REPORT;
+                        let (b, ok) = (BURSTS.load(Ordering::SeqCst), DECODED.load(Ordering::SeqCst));
+                        let (b, ok) = (b - last.0, ok - last.1);
+                        last = (last.0 + b, last.1 + ok);
+                        if b > 0 && ok == 0 {
+                            emit(|| {
+                                format!(
+                                    "· heard {} VARA data bursts in {} min but decoded none: too weak or distorted, \
+                                     or at a bandwidth not monitored\n",
+                                    b / bws_n,
+                                    UNDECODED_REPORT.as_secs() / 60
+                                )
+                            });
+                        }
+                    }
                 }
                 m.finish();
                 drain(&mut m);
+                heard.flush(true);
             })?;
             decoders.push(Decoder { bw: b, tx: Some(tx), worker: Some(worker), dropped: AtomicUsize::new(0) });
         }
@@ -167,33 +196,78 @@ impl Drop for Passive {
     }
 }
 
-/// Turns the passive decoder's records into readout text, keeping only what a person reads.
+/// How long an undecoded burst waits for a decoder at another bandwidth to decode it, before
+/// it is shown as undecoded.
+const UNDECODED_WAIT: std::time::Duration = std::time::Duration::from_secs(3);
+
+/// Turns one passive decoder's records into readout lines: every frame it hears, as
+/// xara-monitor prints them and tagged with its bandwidth, plus the text of data frames.
 struct Heard {
     bw: Bandwidth,
-    cq: bool,
+    /// The first decoder also shows CQs (they decode at any bandwidth) and undecoded bursts.
+    first: bool,
+    /// Every frame, or only links, their text and CQs.
+    frames: bool,
     winlink: bool,
+    /// Undecoded bursts, with the decoded-frame count when heard: shown once no decoder has
+    /// decoded anything since, so a burst one decoder read is not also shown as unread.
+    pending: Vec<(std::time::Instant, usize, String)>,
 }
 
 impl Heard {
-    fn line(&mut self, r: &Record) -> Option<String> {
+    fn line(&mut self, l: &Line) -> Option<String> {
         let own = OWN_LINK.load(Ordering::SeqCst);
-        match r {
+        let (all, hz) = (self.frames, self.bw.hz());
+        let tag = |t: &str| if all { format!("[{hz}] {}\n", t.trim_start()) } else { String::new() };
+        match &l.rec {
             Record::Header { call, answerer, .. } if !own => {
                 self.winlink = false;
-                Some(format!("— heard {call} → {answerer} ({} Hz) —\n", self.bw.hz()))
+                Some(format!("— heard {call} → {answerer} ({} Hz) —\n{}", self.bw.hz(), tag(&l.text)))
             }
             Record::Payload { body: Body::Data { data, .. }, .. } if !own => {
                 let head = String::from_utf8_lossy(&data[..data.len().min(256)]);
                 if head.contains("[WL2K") || head.contains("B2F") || head.lines().any(|l| l.starts_with("FC ")) {
                     self.winlink = true;
                 }
-                Some(render(data, self.winlink))
+                Some(tag(&l.text) + &render(data, self.winlink))
             }
             Record::LinkEnd { caller, answerer, why, .. } if !own => {
                 Some(format!("— {caller} → {answerer} ended ({why}) —\n"))
             }
-            Record::Cq { line, .. } if self.cq => Some(format!("{line}\n")),
-            _ => None,
+            Record::Cq { line, .. } if self.first => Some(format!("{line}\n")),
+            Record::Cq { .. } => None,
+            Record::Data { frames, .. } => {
+                // Every decoder sees every burst; only the one at its bandwidth decodes frames ('+').
+                let ok = frames.chars().filter(|&c| c == '+').count();
+                BURSTS.fetch_add(1, Ordering::SeqCst);
+                DECODED.fetch_add(ok, Ordering::SeqCst);
+                match (ok, own, self.first) {
+                    _ if !all => None,
+                    (0, false, true) => {
+                        self.pending.push((std::time::Instant::now(), DECODED.load(Ordering::SeqCst), l.text.clone()));
+                        None
+                    }
+                    (0, _, _) | (_, true, _) => None,
+                    _ => Some(tag(&l.text)),
+                }
+            }
+            Record::Summary(_) => None,
+            _ if own || !all => None,
+            _ => Some(tag(&l.text)),
+        }
+    }
+
+    /// Shows the undecoded bursts that no decoder has read since; all of them at the end.
+    fn flush(&mut self, all: bool) {
+        let now = std::time::Instant::now();
+        let decoded = DECODED.load(Ordering::SeqCst);
+        let (due, wait): (Vec<_>, Vec<_>) =
+            self.pending.drain(..).partition(|(t, _, _)| all || now.duration_since(*t) >= UNDECODED_WAIT);
+        self.pending = wait;
+        for (_, seen, text) in due {
+            if decoded == seen {
+                emit(|| format!("[?] {}  (not decoded)\n", text.trim_start()));
+            }
         }
     }
 }

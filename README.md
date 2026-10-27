@@ -142,6 +142,7 @@ see [android/README.md](android/README.md) for the details.
     --record PATH           record rx, tx and PTT to FLAC (or WAV if .wav)
     --monitor               print what's received, other stations' HF traffic too
     --monitor-call CALL     name CALL when heard (repeatable; else #hash)
+    --monitor-frames        show every frame heard, not just links and text
     --quiet                 no output
     --version and --help    guess
 

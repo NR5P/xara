@@ -35,6 +35,7 @@ struct ModemView: View {
     @AppStorage("uiControl") private var uiControl = false
     @AppStorage("monitor") private var monitor = false
     @AppStorage("monitorCalls") private var monitorCalls = ""
+    @AppStorage("monitorFrames") private var monitorFrames = false
     @AppStorage("autoStart") private var autoStart = false
     @State private var loginItem = LoginItem.enabled
     @State private var devices = Devices.audio()
@@ -123,6 +124,11 @@ struct ModemView: View {
             Section {
                 Toggle("Show other stations' traffic", isOn: $monitor).disabled(!mode.isHF)
                 if monitor && mode.isHF {
+                    Picker("Show", selection: $monitorFrames) {
+                        Text("Text only").tag(false)
+                        Text("Every packet").tag(true)
+                    }
+                    .pickerStyle(.segmented)
                     TextField("Calls to name (optional)", text: $monitorCalls)
                 }
             } header: {
@@ -131,7 +137,8 @@ struct ModemView: View {
                 Text(mode.isHF
                     ? "The Received tab always shows your own links. With this on it also decodes VARA HF traffic "
                         + "between other stations, like VARA's monitor. Answering stations show as #hash unless "
-                        + "their call is listed, separated by spaces."
+                        + "their call is listed, separated by spaces. Every packet lists each frame heard, as "
+                        + "VARA's monitor does."
                     : "Showing other stations' traffic is for VARA HF; FM shows your own links only.")
                     .font(.caption).foregroundStyle(.secondary)
             }

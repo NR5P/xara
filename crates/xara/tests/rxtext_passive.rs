@@ -12,11 +12,12 @@ use xara_phy::hf::level::Bandwidth;
 #[test]
 fn other_stations_traffic_is_shown_when_monitoring_at_its_own_bandwidth_or_another() {
     // One test, as the received-text sink is global to the process.
-    other_stations_traffic_at(Bandwidth::Hz2300, Bandwidth::Hz2300);
-    other_stations_traffic_at(Bandwidth::Hz500, Bandwidth::Hz2300);
+    other_stations_traffic_at(Bandwidth::Hz2300, Bandwidth::Hz2300, false);
+    other_stations_traffic_at(Bandwidth::Hz500, Bandwidth::Hz2300, false);
+    other_stations_traffic_at(Bandwidth::Hz2300, Bandwidth::Hz2300, true);
 }
 
-fn other_stations_traffic_at(link_bw: Bandwidth, modem_bw: Bandwidth) {
+fn other_stations_traffic_at(link_bw: Bandwidth, modem_bw: Bandwidth, frames: bool) {
     let got = Arc::new(Mutex::new(String::new()));
     let g = got.clone();
     xara::rxtext::set_sink(move |s| g.lock().unwrap().push_str(s));
@@ -26,7 +27,8 @@ fn other_stations_traffic_at(link_bw: Bandwidth, modem_bw: Bandwidth) {
         Station::new(Config { seed: 5, ..Config::new(bw, "N1CALL") }, Options::default()),
     ];
     let mut link = air::Air::pair(st, [2400; 2], 0.0, |r| !matches!(r, Report::Host(HostEvent::Connected { .. })));
-    let passive = Passive::spawn(modem_bw, &["N1CALL".to_string()]).unwrap();
+    let start = got.lock().unwrap().len();
+    let passive = Passive::spawn(modem_bw, &["N1CALL".to_string()], frames).unwrap();
     let step = |link: &mut air::Air<Station, 2>| {
         link.step();
         let w = &link.wire;
@@ -57,9 +59,13 @@ fn other_stations_traffic_at(link_bw: Bandwidth, modem_bw: Bandwidth) {
     assert!(run(&mut link, 40.0, &|l| l.st.iter().all(Station::idle)), "no disconnect");
     run(&mut link, 10.0, &|_| false);
     drop(passive);
-    let text = got.lock().unwrap().clone();
+    let text = got.lock().unwrap()[start..].to_string();
     assert!(text.contains("— showing other stations' traffic (500, 2300 Hz) —"), "{text}");
     assert!(text.contains(&format!("— heard N0CALL → N1CALL ({} Hz) —", link_bw.hz())), "{text}");
     assert!(text.contains("— N0CALL → N1CALL ended"), "{text}");
+    // Every packet shows control and data frames tagged with their bandwidth; text only doesn't.
+    let tagged = format!("[{}] CALLER", link_bw.hz());
+    assert_eq!(text.contains(&tagged), frames, "{text}");
+    assert_eq!(text.contains(&format!("[{}] DATA", link_bw.hz())), frames, "{text}");
     assert!(text.contains("QSL on the 20m net, 73"), "{text}");
 }

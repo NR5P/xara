@@ -11,7 +11,9 @@
 - macOS app (`macos/`): window, menu bar icon, settings, and `xara://start`
   and `xara://stop` for other apps
 - received-text readout in the iOS and macOS apps, and `--monitor` to also
-  decode other stations' VARA HF traffic (`--monitor-call` names them)
+  decode other stations' VARA HF traffic (`--monitor-call` names them) at
+  500 and 2300 Hz at once; `--monitor-frames` lists every frame heard, as the
+  apps' *Every packet* setting; the Android app gets the Received tab too
 
 ## 0.1.1
 
