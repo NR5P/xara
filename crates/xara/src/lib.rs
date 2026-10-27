@@ -3,6 +3,8 @@ pub mod log;
 pub mod audio;
 pub mod cli;
 pub mod flac;
+#[cfg(target_os = "macos")]
+mod hid;
 pub mod monitor;
 pub mod ptt;
 pub mod record;

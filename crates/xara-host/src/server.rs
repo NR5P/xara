@@ -3,6 +3,8 @@ use crate::writer::Writer;
 use std::io::{self, Read};
 use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::os::fd::AsRawFd;
+#[cfg(not(target_os = "linux"))]
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, SyncSender, sync_channel};
 use std::sync::{Arc, Condvar, Mutex};
 use std::thread;
@@ -126,6 +128,7 @@ impl Drop for Host {
     }
 }
 
+#[cfg(target_os = "linux")]
 fn set_reuse(l: &TcpListener, on: bool) -> io::Result<()> {
     let v: libc::c_int = on.into();
     let len = std::mem::size_of_val(&v) as libc::socklen_t;
@@ -137,14 +140,20 @@ fn set_reuse(l: &TcpListener, on: bool) -> io::Result<()> {
     Ok(())
 }
 
-fn pause(l: &TcpListener) -> io::Result<()> {
+// Linux stops a listener with shutdown(SHUT_RD): new clients are refused and the port stays bound.
+#[cfg(target_os = "linux")]
+type Paused = ();
+
+#[cfg(target_os = "linux")]
+fn pause(l: &TcpListener) -> io::Result<Paused> {
     if unsafe { libc::shutdown(l.as_raw_fd(), libc::SHUT_RD) } != 0 {
         return Err(io::Error::last_os_error());
     }
     set_reuse(l, false)
 }
 
-fn resume(l: &TcpListener) -> io::Result<()> {
+#[cfg(target_os = "linux")]
+fn resume(l: &TcpListener, _: &mut Option<Paused>) -> io::Result<()> {
     set_reuse(l, true)?;
     if unsafe { libc::listen(l.as_raw_fd(), 128) } != 0 {
         let e = io::Error::last_os_error();
@@ -152,6 +161,66 @@ fn resume(l: &TcpListener) -> io::Result<()> {
         return Err(e);
     }
     Ok(())
+}
+
+// Elsewhere a listener cannot stop listening, and a bound socket that does not listen drops
+// connections silently, so a bouncer polls the listener and resets each new client at once.
+#[cfg(not(target_os = "linux"))]
+struct Paused {
+    stop: Arc<AtomicBool>,
+    thread: Option<thread::JoinHandle<()>>,
+}
+
+#[cfg(not(target_os = "linux"))]
+impl Drop for Paused {
+    fn drop(&mut self) {
+        self.stop.store(true, Ordering::SeqCst);
+        if let Some(t) = self.thread.take() {
+            let _ = t.join();
+        }
+    }
+}
+
+#[cfg(not(target_os = "linux"))]
+const BOUNCE_POLL: Duration = Duration::from_millis(10);
+
+#[cfg(not(target_os = "linux"))]
+fn pause(listener: &TcpListener) -> io::Result<Paused> {
+    let l = listener.try_clone()?;
+    l.set_nonblocking(true)?;
+    let stop = Arc::new(AtomicBool::new(false));
+    let s = stop.clone();
+    let thread = thread::Builder::new().name("host-bouncer".into()).spawn(move || {
+        while !s.load(Ordering::SeqCst) {
+            match l.accept() {
+                Ok((c, _)) => reset(&c),
+                Err(e) if e.kind() == io::ErrorKind::WouldBlock => thread::sleep(BOUNCE_POLL),
+                Err(_) => thread::sleep(ACCEPT_BACKOFF),
+            }
+        }
+    });
+    match thread {
+        Ok(t) => Ok(Paused { stop, thread: Some(t) }),
+        Err(e) => {
+            let _ = listener.set_nonblocking(false);
+            Err(e)
+        }
+    }
+}
+
+#[cfg(not(target_os = "linux"))]
+fn reset(c: &TcpStream) {
+    let linger = libc::linger { l_onoff: 1, l_linger: 0 };
+    let len = std::mem::size_of_val(&linger) as libc::socklen_t;
+    // SAFETY: c is an open socket and linger is valid for the call; closing it then sends a reset.
+    unsafe { libc::setsockopt(c.as_raw_fd(), libc::SOL_SOCKET, libc::SO_LINGER, (&raw const linger).cast(), len) };
+}
+
+#[cfg(not(target_os = "linux"))]
+fn resume(l: &TcpListener, paused: &mut Option<Paused>) -> io::Result<()> {
+    // Dropping the bouncer stops it; a client that arrived since waits in the backlog for us.
+    paused.take();
+    l.set_nonblocking(false)
 }
 
 fn bind_fixed(addr: &str, port: u16) -> io::Result<TcpListener> {
@@ -181,15 +250,19 @@ fn serve(l: TcpListener, port: Port, clients: Shared, tx: SyncSender<Input>, hol
                     continue;
                 }
             };
-            if let Err(e) = pause(&l) {
-                eprintln!("xara: {name} cannot refuse a second client: {e}");
-            }
+            let mut paused = match pause(&l) {
+                Ok(p) => Some(p),
+                Err(e) => {
+                    eprintln!("xara: {name} cannot refuse a second client: {e}");
+                    None
+                }
+            };
             if attach(s, port, &clients, &tx, &hold).is_err() {
                 return;
             }
-            if let Err(e) = resume(&l) {
+            if let Err(e) = resume(&l, &mut paused) {
                 eprintln!("xara: {name} cannot listen again, retrying: {e}");
-                while resume(&l).is_err() {
+                while resume(&l, &mut paused).is_err() {
                     thread::sleep(ACCEPT_BACKOFF);
                 }
             }

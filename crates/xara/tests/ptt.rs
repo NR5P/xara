@@ -14,9 +14,25 @@ fn ptt_spec_parse() {
     assert_eq!(PttSpec::parse("dtr:/dev/ttyUSB1"), Ok(PttSpec::Dtr("/dev/ttyUSB1".into())));
     assert_eq!(PttSpec::parse("cm108:/dev/hidraw2"), Ok(PttSpec::Cm108 { path: "/dev/hidraw2".into(), gpio: 3 }));
     assert_eq!(PttSpec::parse("cm108:/dev/hidraw2:4"), Ok(PttSpec::Cm108 { path: "/dev/hidraw2".into(), gpio: 4 }));
+    let usb = |vendor, product, gpio| Ok(PttSpec::Cm108Usb { vendor, product, gpio });
+    assert_eq!(PttSpec::parse("cm108:0d8c:0012"), usb(0x0d8c, 0x0012, 3));
+    assert_eq!(PttSpec::parse("cm108:1209:7388:1"), usb(0x1209, 0x7388, 1));
     assert_eq!(PttSpec::parse("rigctld"), Ok(PttSpec::Rigctld("127.0.0.1:4532".into())));
     assert_eq!(PttSpec::parse("rigctld:radio.lan:4533"), Ok(PttSpec::Rigctld("radio.lan:4533".into())));
-    for bad in ["", "rts", "rts:ttyACM0", "cm108:/dev/hidraw0:9", "cm108:/dev/hidraw0:0", "vox:x", "gpio:4"] {
+    for bad in [
+        "",
+        "rts",
+        "rts:ttyACM0",
+        "cm108:/dev/hidraw0:9",
+        "cm108:/dev/hidraw0:0",
+        "cm108:0d8c",
+        "cm108:d8c:12",
+        "cm108:0d8c:0012:9",
+        "cm108:0d8c:zzzz",
+        "cm108:0d8c:0012:3:4",
+        "vox:x",
+        "gpio:4",
+    ] {
         assert!(PttSpec::parse(bad).is_err(), "{bad}");
     }
 }
@@ -58,7 +74,10 @@ fn serial_refuses_non_serial_devices() {
     assert!(Serial::open("/dev/null", libc::TIOCM_RTS).is_err());
     let (mut m, mut s) = (0, 0);
     let mut name = [0 as libc::c_char; 64];
-    assert_eq!(unsafe { libc::openpty(&mut m, &mut s, name.as_mut_ptr(), std::ptr::null(), std::ptr::null()) }, 0);
+    assert_eq!(
+        unsafe { libc::openpty(&mut m, &mut s, name.as_mut_ptr(), std::ptr::null_mut(), std::ptr::null_mut()) },
+        0
+    );
     let path = unsafe { std::ffi::CStr::from_ptr(name.as_ptr()) }.to_str().unwrap().to_string();
     let e = Serial::open(&path, libc::TIOCM_RTS).err().expect("a pty has no modem lines");
     assert_eq!(e.raw_os_error(), Some(libc::ENOTTY));
@@ -303,7 +322,7 @@ fn radio_mode_needs_explicit_opt_in() {
     assert!(e.contains("--port must be below 65535"), "{e}");
 }
 
-#[cfg(feature = "pulse")]
+#[cfg(pulse)]
 #[test]
 fn radio_mode_refuses_a_default_sink_before_contacting_the_sound_server() {
     for sink in ["@DEFAULT_SINK@", "default"] {

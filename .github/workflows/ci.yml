@@ -22,6 +22,14 @@ jobs:
       - run: cargo +stable test --locked --release --workspace
       - run: cargo +stable build --locked --release -p xara --no-default-features --features alsa
 
+  macos:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - run: rustup toolchain install stable --profile minimal --component clippy
+      - run: cargo +stable clippy --locked --workspace --all-targets -- -D warnings
+      - run: cargo +stable test --locked --release --workspace
+
   msrv:
     runs-on: ubuntu-24.04
     steps:

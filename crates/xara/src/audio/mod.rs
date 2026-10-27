@@ -1,12 +1,16 @@
-#[cfg(feature = "alsa")]
+#[cfg(alsa)]
 pub mod alsa;
-#[cfg(feature = "pulse")]
+#[cfg(coreaudio)]
+pub mod coreaudio;
+#[cfg(coreaudio)]
+mod coreaudio_ffi;
+#[cfg(pulse)]
 pub mod pulse;
-#[cfg(feature = "pulse")]
+#[cfg(pulse)]
 mod pulse_ffi;
 
-#[cfg(not(any(feature = "pulse", feature = "alsa")))]
-compile_error!("xara needs an audio backend: enable the pulse or alsa feature");
+#[cfg(not(any(pulse, alsa, coreaudio)))]
+compile_error!("xara needs an audio backend: enable the pulse or alsa feature (Linux), or build on macOS");
 
 use std::collections::VecDeque;
 use std::io;
@@ -69,11 +73,18 @@ impl TxAudio {
 pub enum Backend {
     Pulse,
     Alsa,
+    CoreAudio,
 }
 
 impl Default for Backend {
     fn default() -> Self {
-        if cfg!(feature = "pulse") { Self::Pulse } else { Self::Alsa }
+        if cfg!(coreaudio) {
+            Self::CoreAudio
+        } else if cfg!(pulse) {
+            Self::Pulse
+        } else {
+            Self::Alsa
+        }
     }
 }
 
@@ -84,17 +95,19 @@ impl std::str::FromStr for Backend {
         let b = match s {
             "pulse" => Self::Pulse,
             "alsa" => Self::Alsa,
-            _ => return Err(format!("--audio {s:?}: expected pulse or alsa")),
+            "coreaudio" => Self::CoreAudio,
+            _ => return Err(format!("--audio {s:?}: expected pulse, alsa or coreaudio")),
         };
-        if b.built() { Ok(b) } else { Err(format!("--audio {s}: this xara was built without the {s} feature")) }
+        if b.built() { Ok(b) } else { Err(format!("--audio {s}: {}", unbuilt_why(b))) }
     }
 }
 
 impl Backend {
     pub fn built(self) -> bool {
         match self {
-            Self::Pulse => cfg!(feature = "pulse"),
-            Self::Alsa => cfg!(feature = "alsa"),
+            Self::Pulse => cfg!(pulse),
+            Self::Alsa => cfg!(alsa),
+            Self::CoreAudio => cfg!(coreaudio),
         }
     }
 
@@ -102,55 +115,72 @@ impl Backend {
         match self {
             Self::Pulse => "pulse",
             Self::Alsa => "alsa",
+            Self::CoreAudio => "coreaudio",
         }
     }
 }
 
-#[cfg(not(all(feature = "pulse", feature = "alsa")))]
+fn unbuilt_why(b: Backend) -> String {
+    match b {
+        Backend::CoreAudio => "CoreAudio is only available on macOS".into(),
+        _ if !cfg!(target_os = "linux") => format!("{} is only available on Linux", b.name()),
+        _ => format!("this xara was built without the {} feature", b.name()),
+    }
+}
+
+#[cfg(not(all(pulse, alsa, coreaudio)))]
 fn unbuilt(b: Backend) -> io::Error {
-    io::Error::other(format!("this xara was built without the {} feature", b.name()))
+    io::Error::other(unbuilt_why(b))
 }
 
 pub fn open(b: Backend, capture: &str, playback: &str, radio: bool) -> io::Result<Box<dyn Audio>> {
     match b {
-        #[cfg(feature = "pulse")]
+        #[cfg(pulse)]
         Backend::Pulse => Ok(Box::new(pulse::PulseIo::open(capture, playback, radio)?)),
-        #[cfg(feature = "alsa")]
+        #[cfg(alsa)]
         Backend::Alsa => Ok(Box::new(alsa::AlsaIo::open(capture, playback, radio)?)),
-        #[cfg(not(all(feature = "pulse", feature = "alsa")))]
+        #[cfg(coreaudio)]
+        Backend::CoreAudio => Ok(Box::new(coreaudio::CoreAudioIo::open(capture, playback, radio)?)),
+        #[cfg(not(all(pulse, alsa, coreaudio)))]
         _ => Err(unbuilt(b)),
     }
 }
 
 pub fn check_playback(b: Backend, playback: &str, radio: bool) -> io::Result<()> {
     match b {
-        #[cfg(feature = "pulse")]
+        #[cfg(pulse)]
         Backend::Pulse => pulse::check(playback, radio),
-        #[cfg(feature = "alsa")]
+        #[cfg(alsa)]
         Backend::Alsa => alsa::resolve_playback(playback, radio).map(drop),
-        #[cfg(not(all(feature = "pulse", feature = "alsa")))]
+        #[cfg(coreaudio)]
+        Backend::CoreAudio => coreaudio::check(playback, radio),
+        #[cfg(not(all(pulse, alsa, coreaudio)))]
         _ => Err(unbuilt(b)),
     }
 }
 
 pub fn list(b: Backend) -> io::Result<(DeviceList, DeviceList)> {
     match b {
-        #[cfg(feature = "pulse")]
+        #[cfg(pulse)]
         Backend::Pulse => pulse::list(),
-        #[cfg(feature = "alsa")]
+        #[cfg(alsa)]
         Backend::Alsa => alsa::list(),
-        #[cfg(not(all(feature = "pulse", feature = "alsa")))]
+        #[cfg(coreaudio)]
+        Backend::CoreAudio => coreaudio::list(),
+        #[cfg(not(all(pulse, alsa, coreaudio)))]
         _ => Err(unbuilt(b)),
     }
 }
 
 pub fn open_capture(b: Backend, capture: &str) -> io::Result<Box<dyn Audio>> {
     match b {
-        #[cfg(feature = "pulse")]
+        #[cfg(pulse)]
         Backend::Pulse => Ok(Box::new(pulse::PulseIo::open_capture(capture)?)),
-        #[cfg(feature = "alsa")]
+        #[cfg(alsa)]
         Backend::Alsa => Ok(Box::new(alsa::AlsaIo::open_capture(capture)?)),
-        #[cfg(not(all(feature = "pulse", feature = "alsa")))]
+        #[cfg(coreaudio)]
+        Backend::CoreAudio => Ok(Box::new(coreaudio::CoreAudioIo::open_capture(capture)?)),
+        #[cfg(not(all(pulse, alsa, coreaudio)))]
         _ => Err(unbuilt(b)),
     }
 }

@@ -372,6 +372,21 @@ fn devices(b: Backend) -> std::io::Result<Devices> {
     Ok(Devices { backend: b.name(), capture: d(capture), playback: d(playback) })
 }
 
+fn list_devices(argv: &[String]) -> Result<ExitCode, String> {
+    let b = match argv.iter().position(|k| k == "--audio") {
+        Some(i) => argv.get(i + 1).ok_or("--audio needs a value")?.parse()?,
+        None => Backend::default(),
+    };
+    let d = devices(b).map_err(|e| format!("listing {} devices: {e}", b.name()))?;
+    for (what, list) in [("capture", d.capture), ("playback", d.playback)] {
+        println!("{} {what}:", d.backend);
+        for Device { name, desc } in list {
+            println!("  {name}{}", if desc.is_empty() || desc == name { String::new() } else { format!("  ({desc})") });
+        }
+    }
+    Ok(ExitCode::SUCCESS)
+}
+
 fn persist_drive(dir: &std::path::Path, db: f64) {
     let r = settings::load(dir).and_then(|saved| {
         let next = settings::merge(&saved, &vec![("drive-db".to_string(), db.to_string())]);
@@ -624,6 +639,9 @@ fn real_main() -> Result<ExitCode, String> {
             return Ok(ExitCode::from(2));
         }
     };
+    if argv.iter().any(|k| k == "--list-devices") {
+        return list_devices(&argv);
+    }
     let base = match cli::args(parse(&argv), &USAGE) {
         Ok(a) => a,
         Err(c) => return Ok(c),
@@ -871,7 +889,7 @@ mod tests {
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
-    #[cfg(feature = "alsa")]
+    #[cfg(alsa)]
     #[test]
     fn a_save_is_refused_when_startup_would_refuse_its_playback() {
         let null = argv("--call N2CALL --audio alsa --capture null --playback null");
@@ -885,7 +903,7 @@ mod tests {
         assert_eq!(validate(&kv(&[("capture", "hw:1,0")])), Ok(()));
     }
 
-    #[cfg(feature = "alsa")]
+    #[cfg(alsa)]
     #[test]
     fn a_refused_saved_device_keeps_the_other_saved_values() {
         let null = argv("--call N2CALL --audio alsa --capture null --playback null --drive-db -5");

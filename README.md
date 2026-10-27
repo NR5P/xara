@@ -1,6 +1,6 @@
 # xara
 
-a VARA-compatible modem for linux. tested against VARA HF 4.9.0 and FM 4.4.0.
+a VARA-compatible modem for linux and macOS. tested against VARA HF 4.9.0 and FM 4.4.0.
 
 ## minimum config
 
@@ -35,13 +35,41 @@ alternatively for a local setup you can do:
     cargo build --release
     cargo test
 
+### macOS
+
+no extra deps: audio goes through CoreAudio (`--audio coreaudio`, the default
+on macOS). install rust, then the same `cargo install` line as above.
+
+devices are named by CoreAudio UID or by their exact name; list them with:
+
+    xara --list-devices
+
+    xara --call YOURCALL --hf 2300 \
+         --capture "USB Audio CODEC" --playback "USB Audio CODEC" \
+         --radio --ptt rts:/dev/cu.usbserial-0001
+
+without `--radio`, playback is only allowed into a virtual device such as
+[BlackHole](https://github.com/ExistentialAudio/BlackHole), which is also the
+easy way to loop two xara instances (or xara and VARA in a VM) together.
+
+the first run asks for microphone access for your terminal. serial ports are
+the `/dev/cu.*` devices. CM108/CM119 PTT is addressed by USB vendor:product
+id instead of a hidraw path (`ioreg -p IOUSB -l | grep -E 'idVendor|idProduct'`
+shows them): `--ptt cm108:0d8c:0012`, or `cm108:1209:7388` for an AIOC.
+
+to start xara at login, edit and load the launchd agent in `dist/launchd`:
+
+    cp dist/launchd/xara.plist ~/Library/LaunchAgents/
+    launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/xara.plist
+
 ## options
 
     --config FILE           read key = value options from FILE
 
     --call CALL             your callsign (required)
 
-    --audio pulse|alsa      pulse vs alsa audio path
+    --audio pulse|alsa|coreaudio  audio path (coreaudio on macOS)
+    --list-devices          list capture and playback devices, then exit
     --capture SOURCE        audio source
     --playback SINK         audio sink
 
@@ -76,7 +104,7 @@ alternatively for a local setup you can do:
 we support the following PTT methods:
 
  - rts and dtr on a serial port
- - cm108/cm119 HID GPIO
+ - cm108/cm119 HID GPIO (hidraw on linux, USB id on macOS)
  - hamlib rigctld CAT
  - vox (not recommended)
 
@@ -92,6 +120,7 @@ summary of settings:
     --ptt rts:DEV               key serial port on rts, hold dtr low
     --ptt dtr:DEV               key serial port on dtr, hold rts low
     --ptt cm108:DEV[:GPIO]      cm108/cm119 HID GPIO (default GPIO: 3)
+    --ptt cm108:VID:PID[:GPIO]  same, by hex USB id (macOS)
     --ptt rigctld[:HOST:PORT]   hamlib rigctld CAT on HOST:PORT
 
     --ptt-lead-ms N             PTT held for N ms before xmit (default: 0)
@@ -111,7 +140,7 @@ options:
     --wav FILE              load from a wav file
     --stdin RATE            s16le mono at RATE Hz
 
-    --audio pulse|alsa      pulse or alsa audio path
+    --audio pulse|alsa|coreaudio  audio path (coreaudio on macOS)
     --capture SOURCE        audio source
 
     --hf 500|2300|2750      HF bandwidth (default 2300)

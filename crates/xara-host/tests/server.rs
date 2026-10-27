@@ -56,13 +56,29 @@ fn an_over_long_command_line_is_dropped() {
     assert!(matches!(h.input.recv_timeout(Duration::from_secs(1)), Ok(Input::Wrong(l)) if l.len() == MAX_LINE));
 }
 
+/// A second client is refused on Linux; elsewhere it is reset at once, during or just after connecting.
+fn turned_away(addr: std::net::SocketAddr) -> bool {
+    match std::net::TcpStream::connect(addr) {
+        Err(e) if cfg!(target_os = "linux") => e.kind() == std::io::ErrorKind::ConnectionRefused,
+        Err(e) => matches!(e.kind(), std::io::ErrorKind::ConnectionRefused | std::io::ErrorKind::ConnectionReset),
+        Ok(_) if cfg!(target_os = "linux") => false,
+        Ok(mut s) => {
+            s.set_read_timeout(Some(std::time::Duration::from_secs(1))).unwrap();
+            match std::io::Read::read(&mut s, &mut [0]) {
+                Ok(0) => true,
+                Ok(_) => false,
+                Err(e) => e.kind() == std::io::ErrorKind::ConnectionReset,
+            }
+        }
+    }
+}
+
 #[test]
 fn a_second_client_is_refused_and_the_port_stays_ours() {
     use std::io::{Read, Write};
     let (h, mut first) = command_host();
     for _ in 0..3 {
-        let e = TcpStream::connect(h.cmd_addr).map(drop).unwrap_err();
-        assert_eq!(e.kind(), std::io::ErrorKind::ConnectionRefused);
+        assert!(turned_away(h.cmd_addr));
     }
     first.write_all(b"BW500\r").unwrap();
     assert!(matches!(h.input.recv_timeout(Duration::from_secs(1)), Ok(Input::Command(Command::Bw(_)))));

@@ -1,7 +1,5 @@
 mod common;
 use common::{Client, Lab, ask, check_sequence, events, is_reply, vector};
-use std::io::ErrorKind;
-use std::net::TcpStream;
 use xara::station::Modem;
 use xara::station::hf::Station;
 use xara::tnc::Tnc;
@@ -272,14 +270,30 @@ fn registered_station_lists_its_calls() {
     assert_eq!(tail[i..i + 2], ["REGISTERED N0CALL N0CALL-5", "ENCRYPTION DISABLED"]);
 }
 
+/// A second client is refused on Linux; elsewhere it is reset at once, during or just after connecting.
+fn turned_away(addr: std::net::SocketAddr) -> bool {
+    match std::net::TcpStream::connect(addr) {
+        Err(e) if cfg!(target_os = "linux") => e.kind() == std::io::ErrorKind::ConnectionRefused,
+        Err(e) => matches!(e.kind(), std::io::ErrorKind::ConnectionRefused | std::io::ErrorKind::ConnectionReset),
+        Ok(_) if cfg!(target_os = "linux") => false,
+        Ok(mut s) => {
+            s.set_read_timeout(Some(std::time::Duration::from_secs(1))).unwrap();
+            match std::io::Read::read(&mut s, &mut [0]) {
+                Ok(0) => true,
+                Ok(_) => false,
+                Err(e) => e.kind() == std::io::ErrorKind::ConnectionReset,
+            }
+        }
+    }
+}
+
 #[test]
 fn one_client_per_port_and_drop_resets() {
     let mut lab = Lab::new(2);
     let (mut a, mut b) = (lab.attach(0), lab.attach(1));
     lab.settle();
     for addr in [lab.tnc[0].host().cmd_addr, lab.tnc[0].host().data_addr] {
-        let e = TcpStream::connect(addr).map(|_| ()).unwrap_err();
-        assert_eq!(e.kind(), ErrorKind::ConnectionRefused);
+        assert!(turned_away(addr));
     }
     assert_eq!(ask(&mut lab, &mut a, b"VERSION\r", 1), ["VERSION VARA HF v4.9.0"]);
 

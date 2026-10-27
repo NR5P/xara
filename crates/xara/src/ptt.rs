@@ -21,6 +21,7 @@ pub enum PttSpec {
     Rts(String),
     Dtr(String),
     Cm108 { path: String, gpio: u8 },
+    Cm108Usb { vendor: u16, product: u16, gpio: u8 },
     Rigctld(String),
 }
 
@@ -40,6 +41,19 @@ impl PttSpec {
             "vox" if rest.is_empty() => Ok(Self::Vox),
             "rts" => path("rts").map(Self::Rts),
             "dtr" => path("dtr").map(Self::Dtr),
+            "cm108" if !rest.starts_with('/') => {
+                let bad = || "--ptt cm108:VID:PID[:GPIO 1-8], USB IDs in hex (macOS), e.g. cm108:0d8c:0012".to_string();
+                let id = |v: &str| (v.len() == 4).then(|| u16::from_str_radix(v, 16).ok()).flatten().ok_or_else(bad);
+                let (vendor, product, gpio) = match rest.split(':').collect::<Vec<_>>()[..] {
+                    [v, p] => (id(v)?, id(p)?, 3),
+                    [v, p, g] => (id(v)?, id(p)?, g.parse::<u8>().map_err(|e| format!("--ptt cm108 gpio: {e}"))?),
+                    _ => return Err(bad()),
+                };
+                if !(1..=8).contains(&gpio) {
+                    return Err(bad());
+                }
+                Ok(Self::Cm108Usb { vendor, product, gpio })
+            }
             "cm108" => {
                 let (p, g) = match rest.rsplit_once(':') {
                     Some((p, g)) => (p, g.parse::<u8>().map_err(|e| format!("--ptt cm108 gpio: {e}"))?),
@@ -51,7 +65,9 @@ impl PttSpec {
                 Ok(Self::Cm108 { path: p.into(), gpio: g })
             }
             "rigctld" => Ok(Self::Rigctld(if rest.is_empty() { RIGCTLD_DEFAULT.into() } else { rest.into() })),
-            _ => Err(format!("--ptt {s:?}: expected vox, rts:DEV, dtr:DEV, cm108:DEV[:GPIO] or rigctld[:HOST:PORT]")),
+            _ => Err(format!(
+                "--ptt {s:?}: expected vox, rts:DEV, dtr:DEV, cm108:DEV[:GPIO], cm108:VID:PID[:GPIO] or rigctld[:HOST:PORT]"
+            )),
         }
     }
 
@@ -61,6 +77,12 @@ impl PttSpec {
             Self::Rts(p) => Box::new(Serial::open(p, libc::TIOCM_RTS)?),
             Self::Dtr(p) => Box::new(Serial::open(p, libc::TIOCM_DTR)?),
             Self::Cm108 { path, gpio } => Box::new(Cm108::open(path, *gpio)?),
+            #[cfg(target_os = "macos")]
+            Self::Cm108Usb { vendor, product, gpio } => Box::new(Cm108Usb::open(*vendor, *product, *gpio)?),
+            #[cfg(not(target_os = "macos"))]
+            Self::Cm108Usb { .. } => {
+                return Err(io::Error::other("--ptt cm108:VID:PID is for macOS; here use cm108:/dev/hidrawN"));
+            }
             Self::Rigctld(a) => Box::new(Rigctld::open(a)?),
         })
     }
@@ -77,6 +99,11 @@ impl Ptt for Vox {
         "VOX (no PTT line)".into()
     }
 }
+
+#[cfg(target_os = "linux")]
+type IoctlReq = libc::Ioctl;
+#[cfg(not(target_os = "linux"))]
+type IoctlReq = libc::c_ulong;
 
 pub struct Serial {
     f: File,
@@ -95,7 +122,7 @@ impl Serial {
         Ok(s)
     }
 
-    fn modem(&self, req: libc::Ioctl, bits: libc::c_int) -> io::Result<()> {
+    fn modem(&self, req: IoctlReq, bits: libc::c_int) -> io::Result<()> {
         if unsafe { libc::ioctl(self.f.as_raw_fd(), req, &bits) } != 0 {
             return Err(io::Error::last_os_error());
         }
@@ -136,6 +163,12 @@ pub fn cm108_report(gpio: u8, on: bool) -> [u8; 5] {
     [0, 0, if on { m } else { 0 }, m, 0]
 }
 
+#[cfg(not(target_os = "linux"))]
+pub fn is_hidraw(_: &str) -> bool {
+    false
+}
+
+#[cfg(target_os = "linux")]
 pub fn is_hidraw(path: &str) -> bool {
     use std::os::unix::fs::{FileTypeExt, MetadataExt};
     let Ok(m) = std::fs::metadata(path) else { return false };
@@ -166,6 +199,33 @@ impl Ptt for Cm108 {
 
     fn describe(&self) -> String {
         format!("CM108 GPIO{} on {}", self.gpio, self.path)
+    }
+}
+
+#[cfg(target_os = "macos")]
+pub struct Cm108Usb {
+    dev: crate::hid::HidDevice,
+    ids: (u16, u16),
+    gpio: u8,
+}
+
+#[cfg(target_os = "macos")]
+impl Cm108Usb {
+    pub fn open(vendor: u16, product: u16, gpio: u8) -> io::Result<Self> {
+        let mut c = Self { dev: crate::hid::HidDevice::open(vendor, product)?, ids: (vendor, product), gpio };
+        c.set(false)?;
+        Ok(c)
+    }
+}
+
+#[cfg(target_os = "macos")]
+impl Ptt for Cm108Usb {
+    fn set(&mut self, on: bool) -> io::Result<()> {
+        self.dev.write(&cm108_report(self.gpio, on))
+    }
+
+    fn describe(&self) -> String {
+        format!("CM108 GPIO{} on USB {:04x}:{:04x}", self.gpio, self.ids.0, self.ids.1)
     }
 }
 

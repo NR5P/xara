@@ -7,10 +7,15 @@ use std::thread;
 
 static PIPE: AtomicI32 = AtomicI32::new(-1);
 
+#[cfg(not(target_vendor = "apple"))]
+use libc::__errno_location as errno_location;
+#[cfg(target_vendor = "apple")]
+use libc::__error as errno_location;
+
 extern "C" fn deliver(_: libc::c_int) {
     // SAFETY: errno is thread-local and restored before returning; write is async-signal-safe.
     unsafe {
-        let errno = libc::__errno_location();
+        let errno = errno_location();
         let saved = *errno;
         libc::write(PIPE.load(Ordering::Relaxed), [0u8].as_ptr().cast(), 1);
         *errno = saved;
@@ -22,14 +27,20 @@ struct Signals(File);
 impl Signals {
     fn new(sigs: &[libc::c_int]) -> io::Result<Self> {
         let mut fds = [0; 2];
-        // SAFETY: fds has room for the two descriptors pipe2 writes.
-        if unsafe { libc::pipe2(fds.as_mut_ptr(), libc::O_CLOEXEC) } != 0 {
+        // SAFETY: fds has room for the two descriptors pipe writes.
+        if unsafe { libc::pipe(fds.as_mut_ptr()) } != 0 {
             return Err(io::Error::last_os_error());
         }
-        // SAFETY: pipe2 just returned fds[0] and nothing else owns it.
+        // SAFETY: pipe just returned fds[0] and nothing else owns it.
         let rx = Signals(unsafe { File::from_raw_fd(fds[0]) });
-        // SAFETY: pipe2 just returned fds[1] and nothing else owns it.
+        // SAFETY: pipe just returned fds[1] and nothing else owns it.
         let tx = unsafe { OwnedFd::from_raw_fd(fds[1]) };
+        for fd in [rx.0.as_raw_fd(), tx.as_raw_fd()] {
+            // SAFETY: fd is an open descriptor; nothing else runs exec while signals are being set up.
+            if unsafe { libc::fcntl(fd, libc::F_SETFD, libc::FD_CLOEXEC) } != 0 {
+                return Err(io::Error::last_os_error());
+            }
+        }
         // SAFETY: tx is an open descriptor.
         if unsafe { libc::fcntl(tx.as_raw_fd(), libc::F_SETFL, libc::O_NONBLOCK) } != 0 {
             return Err(io::Error::last_os_error());

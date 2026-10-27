@@ -1,5 +1,10 @@
 # Changelog
 
+## unreleased
+
+- macOS support: CoreAudio backend, `--list-devices`, CM108 PTT by USB id,
+  launchd agent
+
 ## 0.1.1
 
 recording feature and bugfixes
