@@ -8,6 +8,8 @@
 - the host, KISS and web UI servers free their ports when dropped
 - Android app (`android/`): AAudio backend and JNI interface in `xara-ffi`
 - log lines go through one hook, so an embedding app gets xara's alone
+- macOS app (`macos/`): window, menu bar icon, settings, and `xara://start`
+  and `xara://stop` for other apps
 
 ## 0.1.1
 

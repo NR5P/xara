@@ -61,6 +61,10 @@ the `/dev/cu.*` devices. CM108/CM119 PTT is addressed by USB vendor:product
 id instead of a hidraw path (`ioreg -p IOUSB -l | grep -E 'idVendor|idProduct'`
 shows them): `--ptt cm108:0d8c:0012`, or `cm108:1209:7388` for an AIOC.
 
+for a window instead of the command line, `macos/` has a Mac app with the
+same modem, settings, web UI and a menu bar icon; see
+[macos/README.md](macos/README.md).
+
 to start xara at login, edit and load the launchd agent in `dist/launchd`:
 
     cp dist/launchd/xara.plist ~/Library/LaunchAgents/
