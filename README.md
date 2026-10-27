@@ -1,6 +1,7 @@
 # xara
 
-a VARA-compatible modem for linux and macOS. tested against VARA HF 4.9.0 and FM 4.4.0.
+a VARA-compatible modem for linux and macOS, with an app for iPhone and iPad.
+tested against VARA HF 4.9.0 and FM 4.4.0.
 
 ## minimum config
 
@@ -19,6 +20,7 @@ to transmit, add `--radio` and `--ptt` flags.
  - all the usual TCP ports (works with your favorite software)
  - digipeating (enable by call with `--digi N1CALL`)
  - `xara-monitor`: passive VARA HF monitor (with web UI)
+ - iOS app: the same modem on an iPhone or iPad, see [iOS](#ios)
 
 ## building
 
@@ -64,7 +66,20 @@ to start xara at login, edit and load the launchd agent in `dist/launchd`:
 
 ### iOS
 
-an iPhone app wrapping the same modem lives in `ios/`; see `ios/README.md`.
+`ios/` is an iPhone and iPad app that runs this same modem: not a rewrite,
+the Rust code linked in through `crates/xara-ffi`. it has the modem settings,
+xara's web UI and the log, and opens the usual TCP ports, so Winlink Express,
+Pat or another VARA client on the phone's network can use it as their modem.
+
+plug in a USB audio interface such as a Digirig. iOS gives apps no serial or
+HID access, so PTT is VOX or hamlib `rigctld` over the network.
+
+to build it, add the rust iOS targets and open the Xcode project; the build
+compiles the Rust modem first:
+
+    rustup target add aarch64-apple-ios aarch64-apple-ios-sim
+
+see [ios/README.md](ios/README.md) for the details.
 
 ## options
 
