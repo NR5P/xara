@@ -1,6 +1,7 @@
 # xara
 
-a VARA-compatible modem for linux and macOS, with an app for iPhone and iPad.
+a VARA-compatible modem for linux and macOS, with apps for iPhone/iPad and
+Android.
 tested against VARA HF 4.9.0 and FM 4.4.0.
 
 ## minimum config
@@ -21,6 +22,7 @@ to transmit, add `--radio` and `--ptt` flags.
  - digipeating (enable by call with `--digi N1CALL`)
  - `xara-monitor`: passive VARA HF monitor (with web UI)
  - iOS app: the same modem on an iPhone or iPad, see [iOS](#ios)
+ - Android app: the same modem on an Android phone or tablet, see [Android](#android)
 
 ## building
 
@@ -83,8 +85,22 @@ see [ios/README.md](ios/README.md) for the details.
 
 ### Android
 
-an Android app wrapping the same modem lives in `android/`; see
-`android/README.md`.
+`android/` is an Android app that runs this same modem, loaded as a native
+library through `crates/xara-ffi`. like the iOS app it has the modem settings,
+xara's web UI and the log, and opens the usual TCP ports for VARA clients on
+the phone's network. it runs as a foreground service, so it keeps going in the
+background.
+
+plug in a USB audio interface such as a Digirig and choose it as the audio in
+and out. PTT is VOX or hamlib `rigctld` over the network.
+
+to build it you need the Android SDK with NDK 28.2 and the rust Android
+targets; gradle compiles the Rust modem first:
+
+    rustup target add aarch64-linux-android x86_64-linux-android
+    cd android && ./gradlew assembleDebug
+
+see [android/README.md](android/README.md) for the details.
 
 ## options
 
