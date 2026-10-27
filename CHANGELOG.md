@@ -4,6 +4,8 @@
 
 - macOS support: CoreAudio backend, `--list-devices`, CM108 PTT by USB id,
   launchd agent
+- iOS app (`ios/`) embedding the modem through the new `xara-ffi` crate
+- the host, KISS and web UI servers free their ports when dropped
 
 ## 0.1.1
 

@@ -1,9 +1,9 @@
+use crate::closer::Closer;
 use crate::command::{Command, parse};
 use crate::writer::Writer;
 use std::io::{self, Read};
 use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::os::fd::AsRawFd;
-#[cfg(not(target_os = "linux"))]
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, SyncSender, sync_channel};
 use std::sync::{Arc, Condvar, Mutex};
@@ -70,6 +70,7 @@ pub struct Host {
     hold: Arc<Hold>,
     pub cmd_addr: SocketAddr,
     pub data_addr: SocketAddr,
+    _closers: [Closer; 2],
 }
 
 impl Host {
@@ -83,15 +84,17 @@ impl Host {
         let (tx, input) = sync_channel(INPUT_QUEUE);
         let clients = Shared::default();
         let hold = Arc::<Hold>::default();
+        let ((cc, cflag), (dc, dflag)) = (Closer::new(&cl)?, Closer::new(&dl)?);
         let h = Self {
             input,
             clients: clients.clone(),
             hold: hold.clone(),
             cmd_addr: cl.local_addr()?,
             data_addr: dl.local_addr()?,
+            _closers: [cc, dc],
         };
-        serve(cl, Port::Cmd, clients.clone(), tx.clone(), hold.clone())?;
-        serve(dl, Port::Data, clients, tx, hold)?;
+        serve(cl, Port::Cmd, clients.clone(), tx.clone(), hold.clone(), cflag)?;
+        serve(dl, Port::Data, clients, tx, hold, dflag)?;
         Ok(h)
     }
 
@@ -124,6 +127,11 @@ impl Host {
 
 impl Drop for Host {
     fn drop(&mut self) {
+        let mut c = self.clients.lock().unwrap();
+        for w in [c.cmd.take(), c.data.take()].into_iter().flatten() {
+            w.close();
+        }
+        drop(c);
         self.hold.set(false);
     }
 }
@@ -236,7 +244,14 @@ fn bind_fixed(addr: &str, port: u16) -> io::Result<TcpListener> {
     Err(io::Error::new(io::ErrorKind::AddrInUse, "no free port"))
 }
 
-fn serve(l: TcpListener, port: Port, clients: Shared, tx: SyncSender<Input>, hold: Arc<Hold>) -> io::Result<()> {
+fn serve(
+    l: TcpListener,
+    port: Port,
+    clients: Shared,
+    tx: SyncSender<Input>,
+    hold: Arc<Hold>,
+    closed: Arc<AtomicBool>,
+) -> io::Result<()> {
     let name = match port {
         Port::Cmd => "host-cmd-accept",
         Port::Data => "host-data-accept",
@@ -244,6 +259,7 @@ fn serve(l: TcpListener, port: Port, clients: Shared, tx: SyncSender<Input>, hol
     thread::Builder::new().name(name.into()).spawn(move || {
         loop {
             let s = match l.accept() {
+                Ok(_) if closed.load(Ordering::SeqCst) => return,
                 Ok((s, _)) => s,
                 Err(_) => {
                     thread::sleep(ACCEPT_BACKOFF);
@@ -257,7 +273,7 @@ fn serve(l: TcpListener, port: Port, clients: Shared, tx: SyncSender<Input>, hol
                     None
                 }
             };
-            if attach(s, port, &clients, &tx, &hold).is_err() {
+            if attach(s, port, &clients, &tx, &hold).is_err() || closed.load(Ordering::SeqCst) {
                 return;
             }
             if let Err(e) = resume(&l, &mut paused) {

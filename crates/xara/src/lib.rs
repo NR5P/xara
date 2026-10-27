@@ -2,6 +2,7 @@
 pub mod log;
 pub mod audio;
 pub mod cli;
+pub mod daemon;
 pub mod flac;
 #[cfg(target_os = "macos")]
 mod hid;

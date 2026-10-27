@@ -22,7 +22,10 @@ const PAGES: Pages = Pages {
 fn start() -> (Publisher, SocketAddr) {
     let (p, sub) = channel(64);
     let ui = UiServer::bind_readonly("127.0.0.1", 0, sub, INFO, PAGES, Vec::new()).unwrap();
-    (p, ui.addr)
+    let addr = ui.addr;
+    // Kept for the rest of the test process: dropping a UiServer closes it.
+    std::mem::forget(ui);
+    (p, addr)
 }
 
 fn get(addr: SocketAddr, head: &str) -> String {

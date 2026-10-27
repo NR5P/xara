@@ -1,0 +1,4 @@
+module XaraFFI {
+    header "xara.h"
+    export *
+}

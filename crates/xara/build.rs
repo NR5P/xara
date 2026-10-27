@@ -13,7 +13,7 @@ fn main() {
     if linux && env::var_os("CARGO_FEATURE_ALSA").is_some() {
         println!("cargo::rustc-cfg=alsa");
     }
-    if os == "macos" {
+    if os == "macos" || os == "ios" {
         println!("cargo::rustc-cfg=coreaudio");
     }
 }

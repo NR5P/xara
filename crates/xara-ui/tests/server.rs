@@ -1,6 +1,6 @@
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{SocketAddr, TcpStream};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 use xara_host::response::{LinkWidth, Response};
 use xara_testkit::json::Value;
 use xara_ui::messages::Info;
@@ -31,7 +31,10 @@ fn start() -> (Telemetry, SocketAddr) {
 fn start_with(access: Access) -> (Telemetry, SocketAddr) {
     let (t, feed) = channel(64);
     let ui = UiServer::bind("127.0.0.1", 0, feed, INFO, access).unwrap();
-    (t, ui.addr)
+    let addr = ui.addr;
+    // Kept for the rest of the test process: dropping a UiServer closes it.
+    std::mem::forget(ui);
+    (t, addr)
 }
 
 fn get(addr: SocketAddr, head: &str) -> (String, String) {
@@ -524,4 +527,27 @@ fn fragmented_commands_and_protocol_errors() {
         }
     };
     assert_eq!(close, (ws::CLOSE, 1002u16.to_be_bytes().to_vec()));
+}
+
+#[test]
+fn a_dropped_server_frees_its_port_and_drops_its_clients() {
+    let (_t, feed) = channel(64);
+    let ui = UiServer::bind("127.0.0.1", 0, feed, INFO, Access::default()).unwrap();
+    let addr = ui.addr;
+    let mut s = open(addr, "GET /stream HTTP/1.1");
+    let mut head = [0u8; 12];
+    s.read_exact(&mut head).unwrap();
+    drop(ui);
+    s.set_read_timeout(Some(Duration::from_secs(3))).unwrap();
+    let mut rest = Vec::new();
+    assert!(s.read_to_end(&mut rest).is_ok(), "client not dropped");
+    let t0 = Instant::now();
+    loop {
+        let (_t, feed) = channel(64);
+        match UiServer::bind("127.0.0.1", addr.port(), feed, INFO, Access::default()) {
+            Ok(_) => break,
+            Err(e) => assert!(t0.elapsed() < Duration::from_secs(2), "port still taken: {e}"),
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
 }

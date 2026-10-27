@@ -205,3 +205,41 @@ fn a_held_data_port_stops_reading() {
     assert_eq!(got.len(), sent);
     assert!(got == pattern(0, sent), "data reordered or lost");
 }
+
+fn rebinds<T>(within: Duration, mut bind: impl FnMut() -> std::io::Result<T>) -> T {
+    let t0 = Instant::now();
+    loop {
+        match bind() {
+            Ok(v) => return v,
+            Err(e) => assert!(t0.elapsed() < within, "port still taken: {e}"),
+        }
+        thread::sleep(Duration::from_millis(20));
+    }
+}
+
+#[test]
+fn dropped_servers_free_their_ports_and_drop_their_clients() {
+    use std::io::Read;
+    let h = Host::bind("127.0.0.1", 0).unwrap();
+    let (cmd, data) = (h.cmd_addr, h.data_addr);
+    let mut c = TcpStream::connect(cmd).unwrap();
+    assert!(matches!(h.input.recv_timeout(Duration::from_secs(1)), Ok(Input::Connected)));
+    drop(h);
+    c.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
+    assert_eq!(c.read(&mut [0]).unwrap_or(0), 0);
+    rebinds(Duration::from_secs(2), || std::net::TcpListener::bind(data));
+    let h = rebinds(Duration::from_secs(2), || Host::bind("127.0.0.1", cmd.port()));
+    assert_eq!(h.cmd_addr, cmd);
+
+    let k = KissServer::bind("127.0.0.1", 0).unwrap();
+    let addr = k.addr;
+    let mut c = TcpStream::connect(addr).unwrap();
+    let t0 = Instant::now();
+    while !k.has_clients() {
+        assert!(t0.elapsed() < Duration::from_secs(1));
+    }
+    drop(k);
+    c.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
+    assert_eq!(c.read(&mut [0]).unwrap_or(0), 0);
+    rebinds(Duration::from_secs(2), || KissServer::bind("127.0.0.1", addr.port()));
+}

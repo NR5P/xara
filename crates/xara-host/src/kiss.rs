@@ -1,3 +1,4 @@
+use crate::closer::Closer;
 use crate::writer::Writer;
 use std::io::{self, Read};
 use std::net::{SocketAddr, TcpListener, TcpStream};
@@ -83,6 +84,15 @@ pub struct KissServer {
     pub input: Receiver<(u8, Vec<u8>)>,
     clients: Clients,
     pub addr: SocketAddr,
+    _closer: Closer,
+}
+
+impl Drop for KissServer {
+    fn drop(&mut self) {
+        for (_, w) in self.clients.lock().unwrap().iter().flatten() {
+            w.close();
+        }
+    }
 }
 
 impl KissServer {
@@ -90,10 +100,12 @@ impl KissServer {
         let l = TcpListener::bind((addr, port))?;
         let (tx, input) = sync_channel(INPUT_QUEUE);
         let clients: Clients = Arc::new(Mutex::new((0..MAX_CLIENTS).map(|_| None).collect()));
-        let s = Self { input, clients: clients.clone(), addr: l.local_addr()? };
+        let (closer, closed) = Closer::new(&l)?;
+        let s = Self { input, clients: clients.clone(), addr: l.local_addr()?, _closer: closer };
         thread::Builder::new().name("kiss-accept".into()).spawn(move || {
             for id in 0u64..=u64::MAX {
                 let s = match l.accept() {
+                    Ok(_) if closed.load(std::sync::atomic::Ordering::SeqCst) => return,
                     Ok((s, _)) => s,
                     Err(_) => {
                         thread::sleep(crate::server::ACCEPT_BACKOFF);

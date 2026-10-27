@@ -179,6 +179,7 @@ fn decode(mut m: Monitor, rx: Receiver<Vec<f64>>, out: Out, ui: Option<Arc<Share
 struct Ui {
     shared: Arc<Shared>,
     status: JoinHandle<()>,
+    _server: UiServer,
 }
 
 fn serve(a: &Args, source: &str, epoch: Option<f64>, stop: &Arc<AtomicBool>) -> io::Result<Option<Ui>> {
@@ -197,7 +198,7 @@ fn serve(a: &Args, source: &str, epoch: Option<f64>, stop: &Arc<AtomicBool>) -> 
             s.publisher.status(s.status());
         }
     })?;
-    Ok(Some(Ui { shared, status }))
+    Ok(Some(Ui { shared, status, _server: ui }))
 }
 
 fn linger(ui: Option<Ui>) {

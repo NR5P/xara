@@ -1,0 +1,22 @@
+[package]
+name = "xara-ffi"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+license.workspace = true
+readme.workspace = true
+repository.workspace = true
+description = "C interface for embedding the xara modem in an app (the iOS app links it as a static library)."
+
+[lib]
+crate-type = ["staticlib", "rlib"]
+
+[dependencies]
+xara = { path = "../xara", default-features = false }
+libc.workspace = true
+
+# The harness captures each test's stderr, which would hide xara's log from the fd-level capture.
+[[test]]
+name = "embed"
+harness = false

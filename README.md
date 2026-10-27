@@ -62,6 +62,10 @@ to start xara at login, edit and load the launchd agent in `dist/launchd`:
     cp dist/launchd/xara.plist ~/Library/LaunchAgents/
     launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/xara.plist
 
+### iOS
+
+an iPhone app wrapping the same modem lives in `ios/`; see `ios/README.md`.
+
 ## options
 
     --config FILE           read key = value options from FILE

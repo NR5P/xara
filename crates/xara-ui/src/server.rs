@@ -9,10 +9,11 @@ use std::io::{self, Read, Write};
 use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr, TcpListener, TcpStream};
 use std::path::Path;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender, channel};
 use std::thread;
 use std::time::{Duration, Instant};
+use xara_host::closer::Closer;
 use xara_host::writer::Writer;
 
 pub const TICK: Duration = Duration::from_millis(100);
@@ -181,6 +182,7 @@ impl Audio {
 
 pub struct UiServer {
     pub addr: SocketAddr,
+    _closer: Closer,
 }
 
 impl UiServer {
@@ -219,9 +221,11 @@ fn serve(
     let open = [Arc::default(), Arc::default()];
     let ctx = Arc::new(Ctx { access, cookie, pages, open });
     let (tx, rx) = channel();
-    thread::Builder::new().name("ui-hub".into()).spawn(move || hub(src, controls, info, rx))?;
-    thread::Builder::new().name("ui-accept".into()).spawn(move || accept(l, tx, ctx))?;
-    Ok(UiServer { addr: local })
+    let (closer, closed) = Closer::new(&l)?;
+    let done = closed.clone();
+    thread::Builder::new().name("ui-hub".into()).spawn(move || hub(src, controls, info, rx, done))?;
+    thread::Builder::new().name("ui-accept".into()).spawn(move || accept(l, tx, ctx, closed))?;
+    Ok(UiServer { addr: local, _closer: closer })
 }
 
 pub fn new_token() -> io::Result<String> {
@@ -276,10 +280,11 @@ impl Drop for Permit {
     }
 }
 
-fn accept(l: TcpListener, joins: Sender<Msg>, ctx: Arc<Ctx>) {
+fn accept(l: TcpListener, joins: Sender<Msg>, ctx: Arc<Ctx>, closed: Arc<AtomicBool>) {
     let pending = Arc::new(AtomicUsize::new(0));
     loop {
         match l.accept() {
+            Ok(_) if closed.load(Ordering::SeqCst) => return,
             Ok((s, _)) => {
                 let Some(p) = Permit::take(&pending, MAX_PENDING) else { continue };
                 let (j, c) = (joins.clone(), ctx.clone());
@@ -292,7 +297,13 @@ fn accept(l: TcpListener, joins: Sender<Msg>, ctx: Arc<Ctx>) {
     }
 }
 
-fn hub(mut src: impl Source, mut controls: Option<Box<dyn Controls>>, info: Info, msgs: Receiver<Msg>) {
+fn hub(
+    mut src: impl Source,
+    mut controls: Option<Box<dyn Controls>>,
+    info: Info,
+    msgs: Receiver<Msg>,
+    closed: Arc<AtomicBool>,
+) {
     let mut clients: Vec<Client> = Vec::new();
     let mut history: VecDeque<String> = VecDeque::new();
     let mut audio = Audio { wf: Waterfall::new(info.span_hz), wanted: false, rows: Vec::new() };
@@ -342,6 +353,10 @@ fn hub(mut src: impl Source, mut controls: Option<Box<dyn Controls>>, info: Info
                 left(gone, &mut controls);
                 audio.sync(&clients, &mut src);
                 continue;
+            }
+            Err(RecvTimeoutError::Timeout) if closed.load(Ordering::SeqCst) => {
+                clients.iter().for_each(|c| c.w.close());
+                return;
             }
             Err(RecvTimeoutError::Timeout) => {}
             Err(RecvTimeoutError::Disconnected) => return,

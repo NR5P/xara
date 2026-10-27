@@ -1,3 +1,6 @@
+// iOS has no device list, so the AudioObject half of this file is unused there.
+#![cfg_attr(target_os = "ios", allow(dead_code))]
+
 use std::ffi::{CString, c_char, c_void};
 use std::io;
 use std::ptr::{NonNull, null, null_mut};
@@ -89,6 +92,7 @@ unsafe extern "C" {
     fn CFStringGetCString(s: *const c_void, buf: *mut c_char, size: CfIndex, enc: u32) -> u8;
 }
 
+#[cfg(target_os = "macos")]
 #[link(name = "CoreAudio", kind = "framework")]
 unsafe extern "C" {
     fn AudioObjectGetPropertyDataSize(
@@ -180,10 +184,12 @@ impl CfString {
     }
 }
 
+#[cfg(target_os = "macos")]
 fn address(selector: u32, scope: u32) -> PropertyAddress {
     PropertyAddress { selector, scope, element: ELEMENT_MAIN }
 }
 
+#[cfg(target_os = "macos")]
 fn property_size(id: ObjectId, selector: u32, scope: u32) -> io::Result<u32> {
     let mut size = 0;
     // SAFETY: the address is valid for the call and size is writable.
@@ -193,6 +199,7 @@ fn property_size(id: ObjectId, selector: u32, scope: u32) -> io::Result<u32> {
     Ok(size)
 }
 
+#[cfg(target_os = "macos")]
 fn property<T: Copy>(id: ObjectId, selector: u32, scope: u32, zero: T) -> io::Result<T> {
     let mut v = zero;
     let mut size = size_of::<T>() as u32;
@@ -203,6 +210,7 @@ fn property<T: Copy>(id: ObjectId, selector: u32, scope: u32, zero: T) -> io::Re
     Ok(v)
 }
 
+#[cfg(target_os = "macos")]
 fn string_property(id: ObjectId, selector: u32) -> io::Result<String> {
     let p: *const c_void = property(id, selector, SCOPE_GLOBAL, null())?;
     let s = NonNull::new(p.cast_mut()).map(CfString).ok_or_else(|| io::Error::other("CoreAudio returned no string"))?;
@@ -218,6 +226,7 @@ pub struct DeviceInfo {
     pub transport: u32,
 }
 
+#[cfg(target_os = "macos")]
 pub fn devices() -> io::Result<Vec<DeviceInfo>> {
     let size = property_size(SYSTEM_OBJECT, HARDWARE_DEVICES, SCOPE_GLOBAL)?;
     let mut ids = vec![0 as ObjectId; size as usize / size_of::<ObjectId>()];
@@ -246,6 +255,20 @@ pub fn devices() -> io::Result<Vec<DeviceInfo>> {
         });
     }
     Ok(v)
+}
+
+/// The uid that stands for iOS's current audio route, which AVAudioSession picks; iOS has no device list.
+pub const IOS_ROUTE: &str = "route";
+
+#[cfg(target_os = "ios")]
+pub fn devices() -> io::Result<Vec<DeviceInfo>> {
+    Ok(vec![DeviceInfo {
+        uid: IOS_ROUTE.into(),
+        name: "audio route".into(),
+        inputs: true,
+        outputs: true,
+        transport: 0,
+    }])
 }
 
 /// An audio queue bound to one device, delivering callbacks on CoreAudio's own thread.
@@ -281,6 +304,9 @@ impl Queue {
     }
 
     pub fn set_device(&self, uid: &str) -> io::Result<()> {
+        if uid == IOS_ROUTE {
+            return Ok(());
+        }
         let s = CfString::new(uid)?;
         let p = s.0.as_ptr().cast_const();
         // SAFETY: the property value is a CFStringRef, which the queue retains.
