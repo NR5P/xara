@@ -1,3 +1,4 @@
+use crate::rxtext::RxText;
 use crate::station::{HostConfig, Modem, Report, TX_RING_BYTES, secs};
 use xara_arq::compression::Compression;
 use xara_arq::host::{HostEvent, LinkBw};
@@ -47,6 +48,7 @@ pub struct Tnc<M: Modem> {
     tune: Option<(Tuner, Time)>,
     restart: bool,
     restart_at: Option<Time>,
+    rx: RxText,
 }
 
 impl<M: Modem> Tnc<M> {
@@ -67,6 +69,7 @@ impl<M: Modem> Tnc<M> {
             tune: None,
             restart: false,
             restart_at: None,
+            rx: RxText::default(),
         }
     }
 
@@ -497,13 +500,18 @@ impl<M: Modem> Tnc<M> {
                 Report::UnencryptedLink => self.say(Response::UnencryptedLink),
                 Report::Line(l) => self.say(Response::Line(l)),
                 Report::Kiss(cmd, data) => {
+                    self.rx.kiss(&data);
                     if let Some(k) = &self.kiss {
                         k.send(cmd.byte(), &data);
                     }
                 }
                 Report::Bitrate { level, bps, tx } => self.say(Response::Bitrate { level, bps, tx }),
-                Report::Host(HostEvent::Data(d)) => self.host.data(&d),
+                Report::Host(HostEvent::Data(d)) => {
+                    self.rx.data(&d);
+                    self.host.data(&d);
+                }
                 Report::Host(HostEvent::Disconnected) => {
+                    self.rx.disconnected();
                     let deferred = self.deferred_mycall.take();
                     if let Some(Err(Invalid)) = deferred {
                         self.say(Response::Wrong);
@@ -516,6 +524,9 @@ impl<M: Modem> Tnc<M> {
                 Report::Host(HostEvent::UnableToConnect) => self.emit(|| Event::UnableToConnect),
                 Report::Host(HostEvent::TimedOut) => self.emit(|| Event::TimedOut),
                 Report::Host(h) => {
+                    if let HostEvent::Connected { caller, answerer, .. } = &h {
+                        self.rx.connected(caller, answerer);
+                    }
                     if let Some(r) = response(h) {
                         self.say(r);
                     }

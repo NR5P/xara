@@ -16,6 +16,7 @@ struct ModemConfig {
             case .fmWide: "FM wide"
             }
         }
+        var isHF: Bool { self == .hf500 || self == .hf2300 || self == .hf2750 }
         var options: [String] {
             switch self {
             case .hf500: ["--hf", "500"]
@@ -45,6 +46,8 @@ struct ModemConfig {
     var uiControl: Bool
     var uiToken: String
     var stateDir: URL
+    var monitor = false
+    var monitorCalls: [String] = []
 
     var arguments: [String] {
         var a = ["--call", call.uppercased()] + mode.options
@@ -55,6 +58,10 @@ struct ModemConfig {
         a += ["--port", "\(Self.commandPort)", "--kiss-port", "\(Self.kissPort)"]
         a += ["--ui-port", "\(Self.uiPort)", "--ui-addr", lan ? "0.0.0.0" : "127.0.0.1"]
         if uiControl { a += ["--ui-control", "--ui-token", uiToken] }
+        if monitor && mode.isHF {
+            a += ["--monitor"]
+            for c in monitorCalls { a += ["--monitor-call", c] }
+        }
         a += ["--state-dir", stateDir.path]
         return a
     }
@@ -67,6 +74,8 @@ final class Modem: ObservableObject {
     @Published private(set) var starting = false
     @Published private(set) var status = "Stopped"
     @Published private(set) var log: [String] = []
+    /// What the modem received, as readable text, appended as it arrives.
+    @Published private(set) var received = ""
     @Published private(set) var route = AudioRoute.describe()
 
     private var handle: OpaquePointer?
@@ -154,6 +163,12 @@ final class Modem: ObservableObject {
             got = true
         }
         if got && log.count > 2000 { log.removeFirst(log.count - 2000) }
+        var piece = ""
+        while xara_next_received(&buf, buf.count) { piece += String(cString: buf) }
+        if !piece.isEmpty {
+            received += piece
+            if received.count > Self.receivedLimit { received.removeFirst(received.count - Self.receivedLimit) }
+        }
         if let h = handle, !xara_running(h) {
             Task { await finish() }
         }
@@ -185,4 +200,7 @@ final class Modem: ObservableObject {
     }
 
     func clearLog() { log.removeAll() }
+    func clearReceived() { received = "" }
+
+    static let receivedLimit = 200_000
 }

@@ -7,6 +7,7 @@ struct ContentView: View {
         TabView {
             ModemView().tabItem { Label("Modem", systemImage: "antenna.radiowaves.left.and.right") }
             WebUIView().tabItem { Label("Web UI", systemImage: "waveform") }
+            ReceivedView().tabItem { Label("Received", systemImage: "text.bubble") }
             LogView().tabItem { Label("Log", systemImage: "text.alignleft") }
         }
         .padding(.top, 8)
@@ -32,6 +33,8 @@ struct ModemView: View {
     @AppStorage("uiPort") private var uiPort = 8080
     @AppStorage("lan") private var lan = false
     @AppStorage("uiControl") private var uiControl = false
+    @AppStorage("monitor") private var monitor = false
+    @AppStorage("monitorCalls") private var monitorCalls = ""
     @AppStorage("autoStart") private var autoStart = false
     @State private var loginItem = LoginItem.enabled
     @State private var devices = Devices.audio()
@@ -113,6 +116,23 @@ struct ModemView: View {
                 Text(radio
                     ? "xara keys the radio and transmits into the chosen output. Pick your radio's USB audio interface."
                     : "Without radio mode xara only plays into a virtual device such as BlackHole, so nothing reaches a transmitter.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            .disabled(modem.running)
+
+            Section {
+                Toggle("Show other stations' traffic", isOn: $monitor).disabled(!mode.isHF)
+                if monitor && mode.isHF {
+                    TextField("Calls to name (optional)", text: $monitorCalls)
+                }
+            } header: {
+                Text("Receive")
+            } footer: {
+                Text(mode.isHF
+                    ? "The Received tab always shows your own links. With this on it also decodes VARA HF traffic "
+                        + "between other stations, like VARA's monitor. Answering stations show as #hash unless "
+                        + "their call is listed, separated by spaces."
+                    : "Showing other stations' traffic is for VARA HF; FM shows your own links only.")
                     .font(.caption).foregroundStyle(.secondary)
             }
             .disabled(modem.running)
@@ -225,6 +245,38 @@ struct WebView: NSViewRepresentable {
         if context.coordinator.loaded.map({ $0 != url || $1 != reload }) ?? true {
             context.coordinator.loaded = (url, reload)
             w.load(URLRequest(url: url))
+        }
+    }
+}
+
+struct ReceivedView: View {
+    @EnvironmentObject private var modem: Modem
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Text(modem.received.isEmpty ? "" : "\(modem.received.count) characters")
+                    .font(.caption).foregroundStyle(.secondary)
+                Spacer()
+                Button("Copy") {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(modem.received, forType: .string)
+                }
+                Button("Clear") { modem.clearReceived() }
+            }
+            .padding(8)
+            ScrollViewReader { proxy in
+                ScrollView {
+                    Text(modem.received.isEmpty ? "Nothing received yet." : modem.received)
+                        .font(.system(.body, design: .monospaced))
+                        .foregroundStyle(modem.received.isEmpty ? .secondary : .primary)
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding()
+                    Color.clear.frame(height: 1).id("end")
+                }
+                .onChange(of: modem.received) { _, _ in proxy.scrollTo("end", anchor: .bottom) }
+            }
         }
     }
 }

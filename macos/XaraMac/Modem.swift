@@ -14,6 +14,7 @@ enum Mode: String, CaseIterable, Identifiable {
         case .fmWide: "FM wide"
         }
     }
+    var isHF: Bool { self == .hf500 || self == .hf2300 || self == .hf2750 }
     var options: [String] {
         switch self {
         case .hf500: ["--hf", "500"]
@@ -60,6 +61,8 @@ struct ModemConfig {
     var uiPort: Int { Self.defaults.object(forKey: "uiPort") as? Int ?? 8080 }
     var lan: Bool { Self.defaults.bool(forKey: "lan") }
     var uiControl: Bool { Self.defaults.bool(forKey: "uiControl") }
+    var monitor: Bool { Self.defaults.bool(forKey: "monitor") }
+    var monitorCalls: [String] { calls(Self.defaults.string(forKey: "monitorCalls") ?? "") }
 
     static var callValid: Bool {
         let c = ModemConfig().call.uppercased()
@@ -87,6 +90,10 @@ struct ModemConfig {
         a += ["--addr", bind, "--port", "\(port)", "--kiss-port", "\(kissPort)"]
         a += ["--ui-port", "\(uiPort)", "--ui-addr", bind]
         if uiControl { a += ["--ui-control", "--ui-token", UiToken.value] }
+        if monitor && mode.isHF {
+            a += ["--monitor"]
+            for c in monitorCalls { a += ["--monitor-call", c] }
+        }
         a += ["--state-dir", Self.stateDir.path]
         return a
     }
@@ -100,6 +107,11 @@ struct ModemConfig {
     var commandLine: String {
         (["xara"] + arguments).map { $0.contains(" ") || $0.isEmpty ? "'\($0)'" : $0 }.joined(separator: " ")
     }
+}
+
+/// Calls from a free-form list: spaces or commas between them.
+func calls(_ s: String) -> [String] {
+    s.uppercased().split(whereSeparator: { $0 == " " || $0 == "," }).map(String.init)
 }
 
 enum UiToken {
@@ -122,6 +134,8 @@ final class Modem: ObservableObject {
     @Published private(set) var starting = false
     @Published private(set) var status = "Stopped"
     @Published private(set) var log: [String] = []
+    /// What the modem received, as readable text, appended as it arrives.
+    @Published private(set) var received = ""
 
     private var handle: OpaquePointer?
     private var poll: Timer?
@@ -183,10 +197,19 @@ final class Modem: ObservableObject {
             got = true
         }
         if got && log.count > 5000 { log.removeFirst(log.count - 5000) }
+        var piece = ""
+        while xara_next_received(&buf, buf.count) { piece += String(cString: buf) }
+        if !piece.isEmpty {
+            received += piece
+            if received.count > Self.receivedLimit { received.removeFirst(received.count - Self.receivedLimit) }
+        }
         if let h = handle, !xara_running(h) {
             Task { await stop() }
         }
     }
 
     func clearLog() { log.removeAll() }
+    func clearReceived() { received = "" }
+
+    static let receivedLimit = 500_000
 }

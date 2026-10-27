@@ -6,6 +6,8 @@ SwiftUI app around it:
 
  - **Modem**: call sign, HF/FM mode, TX drive, PTT, start/stop
  - **Web UI**: xara's own web UI (waterfall, levels, status) in a web view
+ - **Received**: what the modem receives, as text; turn on *Show other
+   stations' traffic* to also see VARA HF traffic between other stations
  - **Log**: everything xara logs
 
 the usual VARA ports are open while it runs: command 8300, data 8301,

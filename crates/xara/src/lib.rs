@@ -10,6 +10,7 @@ pub mod monitor;
 pub mod ptt;
 pub mod record;
 pub mod resample;
+pub mod rxtext;
 pub mod signals;
 pub mod station;
 pub mod tnc;

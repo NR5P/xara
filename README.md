@@ -140,6 +140,8 @@ see [android/README.md](android/README.md) for the details.
 
     --digi CALL             FM digipeat for CALL (default: off)
     --record PATH           record rx, tx and PTT to FLAC (or WAV if .wav)
+    --monitor               print what's received, other stations' HF traffic too
+    --monitor-call CALL     name CALL when heard (repeatable; else #hash)
     --quiet                 no output
     --version and --help    guess
 

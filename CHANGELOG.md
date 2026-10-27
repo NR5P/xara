@@ -10,6 +10,8 @@
 - log lines go through one hook, so an embedding app gets xara's alone
 - macOS app (`macos/`): window, menu bar icon, settings, and `xara://start`
   and `xara://stop` for other apps
+- received-text readout in the iOS and macOS apps, and `--monitor` to also
+  decode other stations' VARA HF traffic (`--monitor-call` names them)
 
 ## 0.1.1
 

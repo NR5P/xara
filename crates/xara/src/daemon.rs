@@ -58,6 +58,8 @@ struct Args {
     timing: PttTiming,
     record: Option<PathBuf>,
     hf_given: bool,
+    monitor: bool,
+    heard: Vec<String>,
 }
 
 fn finite(k: &str, v: &str) -> Result<f64, String> {
@@ -91,6 +93,8 @@ fn defaults() -> Args {
         timing: PttTiming::default(),
         record: None,
         hf_given: false,
+        monitor: false,
+        heard: Vec::new(),
     }
 }
 
@@ -146,6 +150,8 @@ fn take(a: &mut Args, k: &str, mut v: impl FnMut() -> Result<String, String>) ->
         "--ptt-tail-ms" => a.timing.tail = Duration::from_millis(num(k, &v()?)?),
         "--ptt-max-s" => a.timing.max_on = Duration::from_secs(num(k, &v()?)?),
         "--record" => a.record = Some(PathBuf::from(v()?)),
+        "--monitor" => a.monitor = true,
+        "--monitor-call" => a.heard.push(cli::call(&v()?)?),
         #[cfg(feature = "registered")]
         "--registered" => a.registered = true,
         #[cfg(not(feature = "registered"))]
@@ -202,6 +208,9 @@ fn check(a: &Args) -> Result<(), String> {
     }
     if a.hf_given && a.fm.is_some() {
         return Err("--hf and --fm cannot both be given".into());
+    }
+    if a.monitor && a.fm.is_some() {
+        return Err("--monitor decodes VARA HF; it is not available with --fm".into());
     }
     if !a.digi.is_empty() && a.fm.is_none() {
         return Err("--digi needs --fm".into());
@@ -496,7 +505,18 @@ fn serve<M: Modem>(
         }
         None => None,
     };
+    // Without an app to show it, received text goes to stdout.
+    if a.monitor && !crate::rxtext::has_sink() {
+        crate::rxtext::set_sink(|s| print!("{s}"));
+    }
+    let passive = match a.monitor {
+        true => Some(crate::rxtext::Passive::spawn(a.bw, &[&[a.call.clone()][..], &a.heard][..].concat())?),
+        false => None,
+    };
     let pumped = pump(a, io.as_mut(), stop, rec, |x, out, forced| {
+        if let Some(p) = &passive {
+            p.feed(x);
+        }
         tnc.process(x, out);
         tnc.force_ptt_off(forced);
         Tick { keyed: tnc.keyed(), tuning: tnc.station().tuning(), restart: tnc.restart_requested() }

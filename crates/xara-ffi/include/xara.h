@@ -37,6 +37,14 @@ uint8_t xara_stop(XaraModem *modem);
 // Returns false when no line is waiting. Lines are also kept on stderr.
 bool xara_next_log(char *buf, size_t cap);
 
+// Copies the next piece of what the modem received over the air into buf, as
+// readable text: chat as text, binary and compressed Winlink blocks as a
+// one-line summary, and "— connected A → B —" / "— disconnected —" markers.
+// Pieces are at most 1024 bytes and may end mid-line; append them as they
+// come. Returns false when nothing is waiting. The data still goes to the
+// connected client unchanged.
+bool xara_next_received(char *buf, size_t cap);
+
 #ifdef __cplusplus
 }
 #endif

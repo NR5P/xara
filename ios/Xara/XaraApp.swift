@@ -9,6 +9,7 @@ struct XaraApp: App {
             TabView {
                 ModemView().tabItem { Label("Modem", systemImage: "antenna.radiowaves.left.and.right") }
                 WebUIView().tabItem { Label("Web UI", systemImage: "waveform") }
+                ReceivedView().tabItem { Label("Received", systemImage: "text.bubble") }
                 LogView().tabItem { Label("Log", systemImage: "text.alignleft") }
             }
             .environmentObject(modem)

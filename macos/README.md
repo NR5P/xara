@@ -7,6 +7,10 @@ linked in through `crates/xara-ffi`, with a window and a menu bar icon.
    radio mode and PTT (VOX, serial RTS/DTR, CM108/AIOC by USB id, rigctld),
    ports, LAN access, start at login
  - **Web UI**: xara's own web UI (waterfall, levels, status)
+ - **Received**: what the modem receives, as text: your own links always, and
+   with *Show other stations' traffic* on, VARA HF traffic between other
+   stations too (like VARA's monitor). Winlink's compressed data shows as a
+   one-line summary rather than noise
  - **Log**: everything xara logs
  - **menu bar**: running state, start/stop, open the window or the web UI
 
