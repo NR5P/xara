@@ -81,6 +81,11 @@ compiles the Rust modem first:
 
 see [ios/README.md](ios/README.md) for the details.
 
+### Android
+
+an Android app wrapping the same modem lives in `android/`; see
+`android/README.md`.
+
 ## options
 
     --config FILE           read key = value options from FILE

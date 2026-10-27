@@ -138,8 +138,8 @@ dependencies = [
 name = "xara-ffi"
 version = "0.1.1"
 dependencies = [
- "libc",
  "xara",
+ "xara-host",
 ]
 
 [[package]]

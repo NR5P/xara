@@ -1,10 +1,10 @@
-//! C interface for embedding xara; see include/xara.h.
+//! C interface for embedding xara; see include/xara.h. On Android, JNI entry points too.
+
+#[cfg(target_os = "android")]
+mod jni;
 
 use std::collections::VecDeque;
 use std::ffi::{CStr, c_char};
-use std::fs::File;
-use std::io::{BufRead, BufReader, Write};
-use std::os::fd::FromRawFd;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, Once, PoisonError};
 use std::thread::{self, JoinHandle};
@@ -28,30 +28,13 @@ fn keep(line: String) {
     log.push_back(line);
 }
 
-/// Sends stderr through a pipe so the app can show xara's log, still copying it to the old stderr.
-fn capture_stderr() {
+/// Takes xara's log lines for the app, still copying them to stderr for a debugger's console.
+fn capture_log() {
     CAPTURE.call_once(|| {
-        let mut fds = [0; 2];
-        // SAFETY: plain descriptor calls; fds has room for the pipe's two ends.
-        let old = unsafe {
-            if libc::pipe(fds.as_mut_ptr()) != 0 {
-                return;
-            }
-            let old = libc::dup(2);
-            if old < 0 || libc::dup2(fds[1], 2) < 0 {
-                return;
-            }
-            libc::close(fds[1]);
-            old
-        };
-        // SAFETY: both descriptors are ours alone from here on.
-        let (rx, mut old) = unsafe { (File::from_raw_fd(fds[0]), File::from_raw_fd(old)) };
-        let _ = thread::Builder::new().name("xara-log".into()).spawn(move || {
-            for line in BufReader::new(rx).lines().map_while(Result::ok) {
-                let _ = writeln!(old, "{line}");
-                keep(line);
-            }
-        });
+        xara_host::log::set_sink(|s| {
+            eprintln!("{s}");
+            s.lines().for_each(|l| keep(l.to_string()));
+        })
     });
 }
 
@@ -78,7 +61,7 @@ pub fn start(args: Vec<String>) -> Option<XaraModem> {
     if RUNNING.swap(true, Ordering::SeqCst) {
         return None;
     }
-    capture_stderr();
+    capture_log();
     let stop = Arc::new(AtomicBool::new(false));
     let s = stop.clone();
     let thread = thread::Builder::new()

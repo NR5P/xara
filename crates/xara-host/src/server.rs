@@ -136,7 +136,7 @@ impl Drop for Host {
     }
 }
 
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "android"))]
 fn set_reuse(l: &TcpListener, on: bool) -> io::Result<()> {
     let v: libc::c_int = on.into();
     let len = std::mem::size_of_val(&v) as libc::socklen_t;
@@ -148,11 +148,11 @@ fn set_reuse(l: &TcpListener, on: bool) -> io::Result<()> {
     Ok(())
 }
 
-// Linux stops a listener with shutdown(SHUT_RD): new clients are refused and the port stays bound.
-#[cfg(target_os = "linux")]
+// Linux (and so Android) stops a listener with shutdown(SHUT_RD): new clients are refused and the port stays bound.
+#[cfg(any(target_os = "linux", target_os = "android"))]
 type Paused = ();
 
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "android"))]
 fn pause(l: &TcpListener) -> io::Result<Paused> {
     if unsafe { libc::shutdown(l.as_raw_fd(), libc::SHUT_RD) } != 0 {
         return Err(io::Error::last_os_error());
@@ -160,7 +160,7 @@ fn pause(l: &TcpListener) -> io::Result<Paused> {
     set_reuse(l, false)
 }
 
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "android"))]
 fn resume(l: &TcpListener, _: &mut Option<Paused>) -> io::Result<()> {
     set_reuse(l, true)?;
     if unsafe { libc::listen(l.as_raw_fd(), 128) } != 0 {
@@ -173,13 +173,13 @@ fn resume(l: &TcpListener, _: &mut Option<Paused>) -> io::Result<()> {
 
 // Elsewhere a listener cannot stop listening, and a bound socket that does not listen drops
 // connections silently, so a bouncer polls the listener and resets each new client at once.
-#[cfg(not(target_os = "linux"))]
+#[cfg(not(any(target_os = "linux", target_os = "android")))]
 struct Paused {
     stop: Arc<AtomicBool>,
     thread: Option<thread::JoinHandle<()>>,
 }
 
-#[cfg(not(target_os = "linux"))]
+#[cfg(not(any(target_os = "linux", target_os = "android")))]
 impl Drop for Paused {
     fn drop(&mut self) {
         self.stop.store(true, Ordering::SeqCst);
@@ -189,10 +189,10 @@ impl Drop for Paused {
     }
 }
 
-#[cfg(not(target_os = "linux"))]
+#[cfg(not(any(target_os = "linux", target_os = "android")))]
 const BOUNCE_POLL: Duration = Duration::from_millis(10);
 
-#[cfg(not(target_os = "linux"))]
+#[cfg(not(any(target_os = "linux", target_os = "android")))]
 fn pause(listener: &TcpListener) -> io::Result<Paused> {
     let l = listener.try_clone()?;
     l.set_nonblocking(true)?;
@@ -216,7 +216,7 @@ fn pause(listener: &TcpListener) -> io::Result<Paused> {
     }
 }
 
-#[cfg(not(target_os = "linux"))]
+#[cfg(not(any(target_os = "linux", target_os = "android")))]
 fn reset(c: &TcpStream) {
     let linger = libc::linger { l_onoff: 1, l_linger: 0 };
     let len = std::mem::size_of_val(&linger) as libc::socklen_t;
@@ -224,7 +224,7 @@ fn reset(c: &TcpStream) {
     unsafe { libc::setsockopt(c.as_raw_fd(), libc::SOL_SOCKET, libc::SO_LINGER, (&raw const linger).cast(), len) };
 }
 
-#[cfg(not(target_os = "linux"))]
+#[cfg(not(any(target_os = "linux", target_os = "android")))]
 fn resume(l: &TcpListener, paused: &mut Option<Paused>) -> io::Result<()> {
     // Dropping the bouncer stops it; a client that arrived since waits in the backlog for us.
     paused.take();
@@ -269,7 +269,7 @@ fn serve(
             let mut paused = match pause(&l) {
                 Ok(p) => Some(p),
                 Err(e) => {
-                    eprintln!("xara: {name} cannot refuse a second client: {e}");
+                    crate::log::line(format_args!("xara: {name} cannot refuse a second client: {e}"));
                     None
                 }
             };
@@ -277,7 +277,7 @@ fn serve(
                 return;
             }
             if let Err(e) = resume(&l, &mut paused) {
-                eprintln!("xara: {name} cannot listen again, retrying: {e}");
+                crate::log::line(format_args!("xara: {name} cannot listen again, retrying: {e}"));
                 while resume(&l, &mut paused).is_err() {
                     thread::sleep(ACCEPT_BACKOFF);
                 }

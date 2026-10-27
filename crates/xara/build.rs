@@ -2,7 +2,7 @@ use std::env;
 
 fn main() {
     println!("cargo::rerun-if-changed=build.rs");
-    for c in ["pulse", "alsa", "coreaudio"] {
+    for c in ["pulse", "alsa", "coreaudio", "aaudio"] {
         println!("cargo::rustc-check-cfg=cfg({c})");
     }
     let os = env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
@@ -15,5 +15,8 @@ fn main() {
     }
     if os == "macos" || os == "ios" {
         println!("cargo::rustc-cfg=coreaudio");
+    }
+    if os == "android" {
+        println!("cargo::rustc-cfg=aaudio");
     }
 }

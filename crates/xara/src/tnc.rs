@@ -284,7 +284,7 @@ impl<M: Modem> Tnc<M> {
 
     fn echo(&self, s: &str) {
         if self.echo {
-            eprintln!("{:10.3} {s}", secs(self.station.now()));
+            xara_host::log::line(format_args!("{:10.3} {s}", secs(self.station.now())));
         }
     }
 

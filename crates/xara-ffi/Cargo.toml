@@ -7,16 +7,11 @@ publish.workspace = true
 license.workspace = true
 readme.workspace = true
 repository.workspace = true
-description = "C interface for embedding the xara modem in an app (the iOS app links it as a static library)."
+description = "C and JNI interfaces for embedding the xara modem in an app (iOS links it statically, Android loads it as a shared library)."
 
 [lib]
-crate-type = ["staticlib", "rlib"]
+crate-type = ["staticlib", "cdylib", "rlib"]
 
 [dependencies]
 xara = { path = "../xara", default-features = false }
-libc.workspace = true
-
-# The harness captures each test's stderr, which would hide xara's log from the fd-level capture.
-[[test]]
-name = "embed"
-harness = false
+xara-host.workspace = true

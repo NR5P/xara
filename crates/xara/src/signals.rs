@@ -7,7 +7,9 @@ use std::thread;
 
 static PIPE: AtomicI32 = AtomicI32::new(-1);
 
-#[cfg(not(target_vendor = "apple"))]
+#[cfg(target_os = "android")]
+use libc::__errno as errno_location;
+#[cfg(not(any(target_vendor = "apple", target_os = "android")))]
 use libc::__errno_location as errno_location;
 #[cfg(target_vendor = "apple")]
 use libc::__error as errno_location;
