@@ -274,6 +274,11 @@ fn check(a: &Args) -> Result<(), String> {
         (true, None) => return Err("--radio needs --ptt (use --ptt vox for VOX)".into()),
         _ => {}
     }
+    match (a.audio == Backend::Trusdx, a.ptt == Some(PttSpec::Trusdx)) {
+        (false, true) => return Err("--ptt trusdx needs --audio trusdx".into()),
+        (true, false) if a.radio => return Err("--audio trusdx keys the radio over CAT: use --ptt trusdx".into()),
+        _ => {}
+    }
     if a.timing.lead > Duration::from_secs(1) || a.timing.tail > Duration::from_secs(1) {
         return Err("--ptt-lead-ms and --ptt-tail-ms must be <= 1000".into());
     }

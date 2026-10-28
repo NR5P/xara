@@ -59,4 +59,6 @@ dependencies {
     implementation("androidx.compose.material:material-icons-extended")
     implementation("androidx.compose.ui:ui")
     implementation("androidx.core:core-ktx:1.15.0")
+    // USB serial adapters (the (tr)uSDX's CH340) through Android's USB host API.
+    implementation("com.github.mik3y:usb-serial-for-android:3.8.0")
 }

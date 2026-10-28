@@ -14,6 +14,7 @@ pub mod rxtext;
 pub mod signals;
 pub mod station;
 pub mod tnc;
+pub mod trusdx;
 pub mod wav;
 
 pub const DEFAULT_ADDR: &str = "127.0.0.1";

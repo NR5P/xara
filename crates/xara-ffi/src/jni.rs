@@ -16,6 +16,8 @@ const GET_STRING_UTF_CHARS: usize = 169;
 const RELEASE_STRING_UTF_CHARS: usize = 170;
 const GET_ARRAY_LENGTH: usize = 171;
 const GET_OBJECT_ARRAY_ELEMENT: usize = 173;
+const GET_BYTE_ARRAY_REGION: usize = 200;
+const SET_BYTE_ARRAY_REGION: usize = 208;
 
 /// # Safety
 /// `env` must be a live JNIEnv and `F` the slot's C signature.
@@ -98,4 +100,45 @@ pub extern "C" fn Java_io_github_x0rro_xara_Native_nextReceived(env: Env, _: JOb
 pub extern "C" fn Java_io_github_x0rro_xara_Native_nextLog(env: Env, _: JObject) -> JObject {
     // SAFETY: the JVM passes a live env.
     crate::next_log().map_or(null_mut(), |l| unsafe { new_string(env, &l) })
+}
+
+/// Bytes the app read from a (tr)uSDX's serial port: the first `n` of `data`.
+#[unsafe(no_mangle)]
+pub extern "C" fn Java_io_github_x0rro_xara_Native_serialIn(env: Env, _: JObject, data: JObject, n: i32) {
+    let mut buf = vec![0u8; n.max(0) as usize];
+    // SAFETY: the JVM passes a live env and a byte[] of at least n bytes, as Kotlin guarantees.
+    unsafe {
+        let get = slot::<unsafe extern "C" fn(Env, JObject, i32, i32, *mut u8)>(env, GET_BYTE_ARRAY_REGION);
+        get(env, data, 0, buf.len() as i32, buf.as_mut_ptr());
+    }
+    xara::audio::trusdx::app_received(&buf);
+}
+
+/// Fills `buf` with bytes to write to the radio, waiting up to `wait_ms` for some; returns how many.
+#[unsafe(no_mangle)]
+pub extern "C" fn Java_io_github_x0rro_xara_Native_serialOut(env: Env, _: JObject, buf: JObject, wait_ms: i32) -> i32 {
+    // SAFETY: the JVM passes a live env and a byte[].
+    unsafe {
+        let len = slot::<unsafe extern "C" fn(Env, JObject) -> i32>(env, GET_ARRAY_LENGTH)(env, buf);
+        let wait = std::time::Duration::from_millis(wait_ms.max(0) as u64);
+        let out = xara::audio::trusdx::app_take(len.max(0) as usize, wait);
+        let set = slot::<unsafe extern "C" fn(Env, JObject, i32, i32, *const u8)>(env, SET_BYTE_ARRAY_REGION);
+        set(env, buf, 0, out.len() as i32, out.as_ptr());
+        out.len() as i32
+    }
+}
+
+/// The app lost the radio's serial port; the modem stops, saying why.
+#[unsafe(no_mangle)]
+pub extern "C" fn Java_io_github_x0rro_xara_Native_serialFailed(env: Env, _: JObject, why: JObject) {
+    // SAFETY: the JVM passes a live env and a String.
+    let why = unsafe {
+        let chars = slot::<unsafe extern "C" fn(Env, JObject, *mut u8) -> *const c_char>(env, GET_STRING_UTF_CHARS);
+        let release = slot::<unsafe extern "C" fn(Env, JObject, *const c_char)>(env, RELEASE_STRING_UTF_CHARS);
+        let p = chars(env, why, null_mut());
+        let s = CStr::from_ptr(p).to_string_lossy().into_owned();
+        release(env, why, p);
+        s
+    };
+    xara::audio::trusdx::app_failed(&why);
 }

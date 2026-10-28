@@ -22,4 +22,13 @@ object Native {
 
     /** The next piece of what the modem received, as readable text, or null. */
     external fun nextReceived(): String?
+
+    /** Bytes read from a (tr)uSDX's serial port: the first [n] of [data]. */
+    external fun serialIn(data: ByteArray, n: Int)
+
+    /** Fills [buf] with bytes to write to the radio, waiting up to [waitMs] for some; returns how many. */
+    external fun serialOut(buf: ByteArray, waitMs: Int): Int
+
+    /** The serial port is gone; the modem stops, saying [why]. */
+    external fun serialFailed(why: String)
 }

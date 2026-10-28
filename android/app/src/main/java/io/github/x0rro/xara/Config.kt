@@ -20,6 +20,12 @@ enum class Mode(val label: String, val options: List<String>) {
 
 enum class Ptt { VOX, RIGCTLD }
 
+/** How the radio is connected: its audio through a USB sound card, or a (tr)uSDX's audio over its CAT port. */
+enum class Hookup(val label: String) {
+    SOUND_CARD("USB sound card (Digirig or similar)"),
+    TRUSDX("(tr)uSDX: audio over CAT on USB"),
+}
+
 const val COMMAND_PORT = 8300
 const val KISS_PORT = 8100
 const val UI_PORT = 8080
@@ -46,6 +52,7 @@ data class ModemConfig(
     val record: File? = null,
     /** Registered VARA speeds, for a user with a VARA licence. */
     val registered: Boolean = false,
+    val hookup: Hookup = Hookup.SOUND_CARD,
 ) {
     val callValid: Boolean
         get() = call.uppercase().matches(Regex("^[A-Z0-9]{3,7}(-[0-9]{1,2})?$")) && !call.uppercase().startsWith("N0CALL")
@@ -54,8 +61,13 @@ data class ModemConfig(
         val bind = if (lan) "0.0.0.0" else "127.0.0.1"
         val a = mutableListOf("--call", call.uppercase())
         a += mode.options
-        a += listOf("--audio", "aaudio", "--capture", "$capture", "--playback", "$playback", "--radio")
-        a += listOf("--ptt", if (ptt == Ptt.VOX) "vox" else "rigctld:$rigctld")
+        if (hookup == Hookup.TRUSDX) {
+            // The radio's serial port, which TrusdxPort carries; PTT is TX0; and RX; in the same stream.
+            a += listOf("--audio", "trusdx", "--capture", "app", "--playback", "app", "--radio", "--ptt", "trusdx")
+        } else {
+            a += listOf("--audio", "aaudio", "--capture", "$capture", "--playback", "$playback", "--radio")
+            a += listOf("--ptt", if (ptt == Ptt.VOX) "vox" else "rigctld:$rigctld")
+        }
         a += listOf("--drive-db", "$driveDb")
         a += listOf("--addr", bind, "--port", "$COMMAND_PORT", "--kiss-port", "$KISS_PORT")
         a += listOf("--ui-port", "$UI_PORT", "--ui-addr", bind)
@@ -97,6 +109,7 @@ class Prefs(context: Context) {
     var debugLog by bool("debugLog", false)
     var recordAudio by bool("recordAudio", false)
     var registered by bool("registered", false)
+    var hookup by string("hookup", Hookup.SOUND_CARD.name)
 
     /** A token kept across launches, so a bookmarked controlling web UI keeps working. */
     val uiToken: String
@@ -118,6 +131,7 @@ class Prefs(context: Context) {
             null
         },
         registered = registered,
+        hookup = Hookup.valueOf(hookup),
     )
 
     private fun string(k: String, d: String) = object : kotlin.properties.ReadWriteProperty<Any?, String> {

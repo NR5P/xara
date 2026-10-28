@@ -23,6 +23,7 @@ pub enum PttSpec {
     Cm108 { path: String, gpio: u8 },
     Cm108Usb { vendor: u16, product: u16, gpio: u8 },
     Rigctld(String),
+    Trusdx,
 }
 
 pub const RIGCTLD_DEFAULT: &str = "127.0.0.1:4532";
@@ -64,9 +65,10 @@ impl PttSpec {
                 }
                 Ok(Self::Cm108 { path: p.into(), gpio: g })
             }
+            "trusdx" if rest.is_empty() => Ok(Self::Trusdx),
             "rigctld" => Ok(Self::Rigctld(if rest.is_empty() { RIGCTLD_DEFAULT.into() } else { rest.into() })),
             _ => Err(format!(
-                "--ptt {s:?}: expected vox, rts:DEV, dtr:DEV, cm108:DEV[:GPIO], cm108:VID:PID[:GPIO] or rigctld[:HOST:PORT]"
+                "--ptt {s:?}: expected vox, rts:DEV, dtr:DEV, cm108:DEV[:GPIO], cm108:VID:PID[:GPIO] rigctld[:HOST:PORT] or trusdx"
             )),
         }
     }
@@ -84,6 +86,7 @@ impl PttSpec {
                 return Err(io::Error::other("--ptt cm108:VID:PID is for macOS; here use cm108:/dev/hidrawN"));
             }
             Self::Rigctld(a) => Box::new(Rigctld::open(a)?),
+            Self::Trusdx => Box::new(Trusdx),
         })
     }
 }
@@ -97,6 +100,20 @@ impl Ptt for Vox {
 
     fn describe(&self) -> String {
         "VOX (no PTT line)".into()
+    }
+}
+
+/// Keys the radio with `TX0;` in the CAT stream that also carries its audio.
+pub struct Trusdx;
+
+impl Ptt for Trusdx {
+    fn set(&mut self, on: bool) -> io::Result<()> {
+        crate::audio::trusdx::set_keyed(on);
+        Ok(())
+    }
+
+    fn describe(&self) -> String {
+        "truSDX CAT (TX0; and RX; in its audio stream)".into()
     }
 }
 

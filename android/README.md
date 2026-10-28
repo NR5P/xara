@@ -42,10 +42,25 @@ is no voice processing or AGC. xara will not start on the phone's own
 speaker or mic unless *Allow the phone's own speaker and mic* is on (for
 testing only). unplugging the interface stops the modem.
 
-PTT is VOX or hamlib `rigctld` reachable over the network. a foreground
+PTT is VOX or hamlib `rigctld` reachable over the network.
+
+### (tr)uSDX
+
+choose *Connection: (tr)uSDX* and plug the radio's USB port into the phone.
+its audio and PTT both go over its USB serial (CAT) port, so there is no
+sound card and no microphone access: xara opens the radio's CH340 serial
+chip through Android's USB host API (`usb-serial-for-android`), at 115200
+8N1, and passes the bytes to the modem (`--audio trusdx --capture app`).
+Android asks once for access to the USB device; plugging the radio in also
+offers to open xara. it needs the DL2MAN / PE1NNZ firmware with CAT
+streaming. unplugging the radio stops the modem. after VA3SHC's
+xara-android (x0rro/xara#12). a foreground
 service with a notification keeps the modem running in the background.
 
 ## not done yet
+
+ - (tr)uSDX tested against a simulated radio (two modems linked over VARA
+   HF through it), not yet with a real one
 
  - no app icon
  - USB serial (CDC) and CM108 PTT, which Android would allow through its USB
