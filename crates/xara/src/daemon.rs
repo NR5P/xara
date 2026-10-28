@@ -56,6 +56,9 @@ struct Args {
     radio: bool,
     ptt: Option<PttSpec>,
     timing: PttTiming,
+    /// Delay in the audio path that xara does not add itself (a phone's own speaker and mic,
+    /// a network audio link): allowed for in its timing, with nothing inserted.
+    audio_latency: Duration,
     record: Option<PathBuf>,
     /// A text log of everything xara logs, its frames and once a second the audio levels.
     debug_log: Option<PathBuf>,
@@ -94,6 +97,7 @@ fn defaults() -> Args {
         radio: false,
         ptt: None,
         timing: PttTiming::default(),
+        audio_latency: Duration::ZERO,
         record: None,
         debug_log: None,
         hf_given: false,
@@ -154,6 +158,7 @@ fn take(a: &mut Args, k: &str, mut v: impl FnMut() -> Result<String, String>) ->
         "--ptt-lead-ms" => a.timing.lead = Duration::from_millis(num(k, &v()?)?),
         "--ptt-tail-ms" => a.timing.tail = Duration::from_millis(num(k, &v()?)?),
         "--ptt-max-s" => a.timing.max_on = Duration::from_secs(num(k, &v()?)?),
+        "--audio-latency-ms" => a.audio_latency = Duration::from_millis(num(k, &v()?)?),
         "--record" => a.record = Some(PathBuf::from(v()?)),
         "--debug-log" => a.debug_log = Some(PathBuf::from(v()?)),
         "--monitor" => a.monitor = true,
@@ -235,6 +240,9 @@ fn check(a: &Args) -> Result<(), String> {
     }
     if a.timing.lead > Duration::from_secs(1) || a.timing.tail > Duration::from_secs(1) {
         return Err("--ptt-lead-ms and --ptt-tail-ms must be <= 1000".into());
+    }
+    if a.audio_latency > Duration::from_secs(1) {
+        return Err("--audio-latency-ms must be <= 1000".into());
     }
     if a.timing.max_on.is_zero() || a.timing.max_on > Duration::from_secs(120) {
         return Err("--ptt-max-s must be 1..120".into());
@@ -378,6 +386,7 @@ fn effective(a: &Args) -> Pairs {
         ("playback", a.playback.clone()),
         ("ptt-lead-ms", a.timing.lead.as_millis().to_string()),
         ("ptt-tail-ms", a.timing.tail.as_millis().to_string()),
+        ("audio-latency-ms", a.audio_latency.as_millis().to_string()),
     ]
     .into_iter()
     .map(|(k, v)| (k.to_string(), v))
@@ -440,7 +449,9 @@ fn run(
     stop: &Arc<AtomicBool>,
     rec: Option<&mut Recorder>,
 ) -> std::io::Result<Outcome> {
-    let opts = Options { drive_db: a.drive_db, tx_latency: lead_samples(a) as i64 };
+    // The PTT lead is silence xara inserts and then allows for; the audio latency is only allowed for.
+    let latency = a.audio_latency.as_millis() as usize * (audio::RATE / 1000) as usize;
+    let opts = Options { drive_db: a.drive_db, tx_latency: (lead_samples(a) + latency) as i64 };
     let host = Host::bind(&a.addr, a.port)?;
     let mode = match a.fm {
         Some(bw) => format!("FM {bw:?}"),
@@ -905,6 +916,16 @@ mod tests {
         assert_eq!((a.call.as_str(), a.radio, a.quiet, a.ui.port), ("N2CALL", true, false, Some(8080)));
         assert_eq!(a.ui.hosts, ["a.lan", "b.lan"]);
         std::fs::remove_dir_all(p.parent().unwrap()).unwrap();
+    }
+
+    #[test]
+    fn audio_latency_is_bounded_and_can_be_saved() {
+        let a = parse(&argv("--call N2CALL --capture c --playback p --audio-latency-ms 300")).unwrap().unwrap();
+        assert_eq!(a.audio_latency, Duration::from_millis(300));
+        assert!(parse(&argv("--call N2CALL --capture c --playback p --audio-latency-ms 1001")).is_err());
+        let saved = vec![("audio-latency-ms".to_string(), "250".to_string())];
+        let b = with_saved(&argv("--call N2CALL --capture c --playback p"), &saved, false).unwrap();
+        assert_eq!(b.audio_latency, Duration::from_millis(250));
     }
 
     #[test]
