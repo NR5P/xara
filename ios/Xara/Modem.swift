@@ -52,6 +52,8 @@ struct ModemConfig {
     var monitorFrames = false
     /// A FLAC recording of the radio's audio (and what xara sends), for troubleshooting.
     var record: URL?
+    /// A timestamped text log of the modem: frames, host commands, audio levels once a second.
+    var debugLog: URL?
 
     var arguments: [String] {
         var a = ["--call", call.uppercased()] + mode.options
@@ -68,6 +70,7 @@ struct ModemConfig {
             for c in monitorCalls { a += ["--monitor-call", c] }
         }
         if let r = record { a += ["--record", r.path] }
+        if let d = debugLog { a += ["--debug-log", d.path] }
         a += ["--state-dir", stateDir.path]
         return a
     }
@@ -122,6 +125,8 @@ final class Modem: ObservableObject {
             return
         }
         route = AudioRoute.describe()
+        debugLog = config.debugLog
+        note("start, route \(route), output volume \(String(format: "%.2f", AVAudioSession.sharedInstance().outputVolume))")
         if !allowBuiltIn, let why = AudioRoute.builtInReason() {
             status = "Not transmitting into \(why). Connect your radio's USB audio interface."
             return
@@ -182,6 +187,7 @@ final class Modem: ObservableObject {
 
     private func routeChanged() {
         route = AudioRoute.describe()
+        if running { note("route changed: \(route)") }
         if running, let why = AudioRoute.builtInReason(), !(lastAllowBuiltIn) {
             status = "Audio moved to \(why); stopped so nothing transmits there."
             Task { await finish() }
@@ -189,6 +195,20 @@ final class Modem: ObservableObject {
     }
 
     private var lastAllowBuiltIn: Bool { UserDefaults.standard.bool(forKey: "allowBuiltIn") }
+
+    /// The debug log in use, if any: what only the app knows (the audio route, the volume) goes in too.
+    private var debugLog: URL?
+
+    private func note(_ s: String) {
+        guard let url = debugLog, let line = "ios: \(Date().formatted(.iso8601)) \(s)\n".data(using: .utf8) else { return }
+        if let h = try? FileHandle(forWritingTo: url) {
+            h.seekToEndOfFile()
+            h.write(line)
+            try? h.close()
+        } else {
+            try? line.write(to: url)
+        }
+    }
 
     private func interrupted(_ type: AVAudioSession.InterruptionType?, resume: Bool) {
         switch type {

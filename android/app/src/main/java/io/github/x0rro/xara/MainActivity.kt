@@ -167,6 +167,8 @@ fun ModemScreen() {
     var monitor by remember { mutableStateOf(prefs.monitor) }
     var monitorFrames by remember { mutableStateOf(prefs.monitorFrames) }
     var monitorCalls by remember { mutableStateOf(prefs.monitorCalls) }
+    var debugLog by remember { mutableStateOf(prefs.debugLog) }
+    var recordAudio by remember { mutableStateOf(prefs.recordAudio) }
     var problem by remember { mutableStateOf<String?>(null) }
     val inputs = rememberDevices(context, true)
     val outputs = rememberDevices(context, false)
@@ -186,6 +188,7 @@ fun ModemScreen() {
         prefs.driveDb = drive; prefs.lan = lan; prefs.uiControl = uiControl; prefs.allowBuiltIn = allowBuiltIn
         prefs.capture = capture; prefs.playback = playback
         prefs.monitor = monitor; prefs.monitorFrames = monitorFrames; prefs.monitorCalls = monitorCalls
+        prefs.debugLog = debugLog; prefs.recordAudio = recordAudio
         val builtIn = listOfNotNull(inputs.find { it.id == capture }, outputs.find { it.id == playback }).filter { it.builtIn }
         problem = when {
             inputs.none { it.id == capture } || outputs.none { it.id == playback } -> "Choose an audio input and output."
@@ -193,7 +196,19 @@ fun ModemScreen() {
                 "Not transmitting into ${builtIn.first().label}. Connect your radio's USB audio interface."
             else -> null
         }
-        if (problem == null) Modem.start(context, prefs.config())
+        if (problem == null) {
+            if (debugLog) {
+                // What only the app knows: the devices by name and the volume the phone plays at.
+                val am = context.getSystemService(AudioManager::class.java)
+                val music = AudioManager.STREAM_MUSIC
+                prefs.debugLogFile.appendText(
+                    "android: start ${java.util.Date()}, in ${inputs.find { it.id == capture }?.label} ($capture), " +
+                        "out ${outputs.find { it.id == playback }?.label} ($playback), media volume " +
+                        "${am.getStreamVolume(music)}/${am.getStreamMaxVolume(music)}, drive $drive dB\n",
+                )
+            }
+            Modem.start(context, prefs.config())
+        }
     }
     val micLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { got ->
         if (got[Manifest.permission.RECORD_AUDIO] == true) start() else problem = "Microphone access is needed to hear the radio."
@@ -276,6 +291,16 @@ fun ModemScreen() {
             } else {
                 "Showing other stations' traffic is for VARA HF; FM shows your own links only."
             },
+        )
+
+        Section("Troubleshooting")
+        Toggle("Keep a debug log", debugLog, editable) { debugLog = it }
+        Toggle("Record received audio", recordAudio, editable) { recordAudio = it }
+        Note(
+            "The debug log adds a timestamped line for every frame heard and sent, every host command and, " +
+                "once a second, the receive and transmit levels, to debug.log in the app's storage. Recording " +
+                "saves what the modem hears and sends (about 3 MB a minute) to recordings/. Both are read with " +
+                "adb shell run-as io.github.x0rro.xara.",
         )
 
         Section("Clients")

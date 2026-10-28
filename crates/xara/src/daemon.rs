@@ -57,6 +57,8 @@ struct Args {
     ptt: Option<PttSpec>,
     timing: PttTiming,
     record: Option<PathBuf>,
+    /// A text log of everything xara logs, its frames and once a second the audio levels.
+    debug_log: Option<PathBuf>,
     hf_given: bool,
     monitor: bool,
     monitor_frames: bool,
@@ -93,6 +95,7 @@ fn defaults() -> Args {
         ptt: None,
         timing: PttTiming::default(),
         record: None,
+        debug_log: None,
         hf_given: false,
         monitor: false,
         monitor_frames: false,
@@ -152,6 +155,7 @@ fn take(a: &mut Args, k: &str, mut v: impl FnMut() -> Result<String, String>) ->
         "--ptt-tail-ms" => a.timing.tail = Duration::from_millis(num(k, &v()?)?),
         "--ptt-max-s" => a.timing.max_on = Duration::from_secs(num(k, &v()?)?),
         "--record" => a.record = Some(PathBuf::from(v()?)),
+        "--debug-log" => a.debug_log = Some(PathBuf::from(v()?)),
         "--monitor" => a.monitor = true,
         "--monitor-frames" => a.monitor_frames = true,
         "--monitor-call" => a.heard.push(cli::call(&v()?)?),
@@ -488,7 +492,8 @@ fn serve<M: Modem>(
         say!("KISS {}", k.addr);
         tnc.set_kiss(k);
     }
-    tnc.set_echo(!a.quiet);
+    tnc.set_echo(!a.quiet || a.debug_log.is_some());
+    tnc.set_level_log(a.debug_log.is_some());
     let _ui = match a.ui.port {
         Some(p) => {
             let (t, feed) = telemetry::channel(EVENT_QUEUE);
@@ -775,6 +780,11 @@ fn session(cmdline: &[String], stop: &Arc<AtomicBool>, inherited: Option<String>
         validate: Box::new(move |kv| with_saved(&check, kv, fm).and_then(|a| check_saved_playback(&a, kv))),
         list: Box::new(move || devices(backend)),
     }));
+    if let Err(e) = xara_host::log::set_file(a.debug_log.as_deref()) {
+        say!("--debug-log {}: {e}", a.debug_log.as_deref().unwrap_or(Path::new("")).display());
+    } else if let Some(p) = &a.debug_log {
+        say!("debug log {} (call {}, capture {}, playback {})", p.display(), a.call, a.capture, a.playback);
+    }
     let mut rec = match &a.record {
         Some(p) => {
             let p = record::part(p, part);
@@ -895,6 +905,13 @@ mod tests {
         assert_eq!((a.call.as_str(), a.radio, a.quiet, a.ui.port), ("N2CALL", true, false, Some(8080)));
         assert_eq!(a.ui.hosts, ["a.lan", "b.lan"]);
         std::fs::remove_dir_all(p.parent().unwrap()).unwrap();
+    }
+
+    #[test]
+    fn debug_log_takes_a_path() {
+        let a = parse(&argv("--call N2CALL --capture c --playback p --debug-log /tmp/x.log")).unwrap().unwrap();
+        assert_eq!(a.debug_log.as_deref(), Some(Path::new("/tmp/x.log")));
+        assert!(parse(&argv("--call N2CALL --capture c --playback p --debug-log")).is_err());
     }
 
     #[test]

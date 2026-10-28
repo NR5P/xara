@@ -40,6 +40,10 @@ data class ModemConfig(
     val monitor: Boolean = false,
     val monitorFrames: Boolean = false,
     val monitorCalls: List<String> = emptyList(),
+    /** A timestamped text log of the modem: frames, host commands, audio levels once a second. */
+    val debugLog: File? = null,
+    /** A FLAC recording of the audio heard and sent, with PTT, for troubleshooting. */
+    val record: File? = null,
 ) {
     val callValid: Boolean
         get() = call.uppercase().matches(Regex("^[A-Z0-9]{3,7}(-[0-9]{1,2})?$")) && !call.uppercase().startsWith("N0CALL")
@@ -59,6 +63,8 @@ data class ModemConfig(
             if (monitorFrames) a += "--monitor-frames"
             monitorCalls.forEach { a += listOf("--monitor-call", it) }
         }
+        debugLog?.let { a += listOf("--debug-log", it.path) }
+        record?.let { a += listOf("--record", it.path) }
         a += listOf("--state-dir", stateDir.path)
         return a.toTypedArray()
     }
@@ -68,6 +74,9 @@ data class ModemConfig(
 class Prefs(context: Context) {
     private val p = context.getSharedPreferences("xara", Context.MODE_PRIVATE)
     private val stateDir = File(context.filesDir, "xara")
+    /** Troubleshooting files, in the app's own storage (`adb shell run-as io.github.x0rro.xara`). */
+    val debugLogFile = File(context.filesDir, "debug.log")
+    val recordingsDir = File(context.filesDir, "recordings")
 
     var call by string("call", "")
     var mode by string("mode", Mode.HF2300.name)
@@ -82,6 +91,8 @@ class Prefs(context: Context) {
     var monitor by bool("monitor", false)
     var monitorFrames by bool("monitorFrames", false)
     var monitorCalls by string("monitorCalls", "")
+    var debugLog by bool("debugLog", false)
+    var recordAudio by bool("recordAudio", false)
 
     /** A token kept across launches, so a bookmarked controlling web UI keeps working. */
     val uiToken: String
@@ -95,6 +106,13 @@ class Prefs(context: Context) {
         call, Mode.valueOf(mode), Ptt.valueOf(ptt), rigctld, driveDb, lan, uiControl, uiToken,
         capture, playback, stateDir, monitor, monitorFrames,
         monitorCalls.uppercase().split(' ', ',').filter { it.isNotBlank() },
+        debugLog = debugLogFile.takeIf { debugLog },
+        record = if (recordAudio) {
+            recordingsDir.mkdirs()
+            File(recordingsDir, "xara-${java.text.SimpleDateFormat("yyyyMMdd-HHmmss", java.util.Locale.US).format(java.util.Date())}.flac")
+        } else {
+            null
+        },
     )
 
     private fun string(k: String, d: String) = object : kotlin.properties.ReadWriteProperty<Any?, String> {

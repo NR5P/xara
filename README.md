@@ -140,6 +140,9 @@ see [android/README.md](android/README.md) for the details.
 
     --digi CALL             FM digipeat for CALL (default: off)
     --record PATH           record rx, tx and PTT to FLAC (or WAV if .wav)
+    --debug-log PATH        append a timestamped log to PATH: every line xara
+                            logs, frames heard and sent, and once a second the
+                            rx and tx audio levels
     --monitor               print what's received, other stations' HF traffic too
     --monitor-call CALL     name CALL when heard (repeatable; else #hash)
     --monitor-frames        show every frame heard, not just links and text

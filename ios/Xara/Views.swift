@@ -13,6 +13,7 @@ struct ModemView: View {
     @AppStorage("monitor") private var monitor = false
     @AppStorage("monitorCalls") private var monitorCalls = ""
     @AppStorage("recordAudio") private var recordAudio = false
+    @AppStorage("debugLog") private var debugLog = false
     @AppStorage("monitorFrames") private var monitorFrames = false
     @AppStorage("allowBuiltIn") private var allowBuiltIn = false
     @State private var addresses: [String] = []
@@ -84,6 +85,7 @@ struct ModemView: View {
                             .autocorrectionDisabled()
                     }
                     Toggle("Record received audio", isOn: $recordAudio)
+                    Toggle("Keep a debug log", isOn: $debugLog)
                 } header: {
                     Text("Receive")
                 } footer: {
@@ -116,7 +118,9 @@ struct ModemView: View {
             : "Showing other stations' traffic is for VARA HF; FM shows your own links only."
         let recordNote = " Recording saves the radio's audio while the modem runs (about 3 MB a minute) to "
             + "Files › On My iPhone › xara, for troubleshooting decoding."
-        return monitorNote + (recordAudio ? recordNote : "")
+        let debugNote = " The debug log adds a timestamped line for every frame heard and sent, every host command and, "
+            + "once a second, the receive and transmit levels, to debug.log in the same place."
+        return monitorNote + (recordAudio ? recordNote : "") + (debugLog ? debugNote : "")
     }
 
     private var clientsFooter: String {
@@ -135,7 +139,8 @@ struct ModemView: View {
             call: call, mode: mode, ptt: ptt, rigctld: rigctld, driveDb: driveDb, lan: lan,
             uiControl: uiControl, uiToken: UiToken.value, stateDir: UiToken.stateDir,
             monitor: monitor, monitorCalls: calls(monitorCalls), monitorFrames: monitorFrames,
-            record: recordAudio ? Recordings.next() : nil)
+            record: recordAudio ? Recordings.next() : nil,
+            debugLog: debugLog ? Recordings.debugLog : nil)
     }
 }
 
@@ -221,6 +226,11 @@ enum Recordings {
         f.dateFormat = "yyyyMMdd-HHmmss"
         let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
         return docs.appendingPathComponent("xara-\(f.string(from: Date())).flac")
+    }
+
+    /// The debug log, kept beside the recordings and appended to on every start.
+    static var debugLog: URL {
+        FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0].appendingPathComponent("debug.log")
     }
 }
 

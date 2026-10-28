@@ -51,6 +51,43 @@ pub struct Tnc<M: Modem> {
     rx: RxText,
     /// The waveform of the last BITRATE, which the host protocol has no room for.
     modulation: String,
+    /// Audio levels for the debug log, when one is kept.
+    levels: Option<Levels>,
+}
+
+/// One second of audio, summed up for the debug log: is anything reaching the modem?
+#[derive(Default)]
+struct Levels {
+    since: Time,
+    n: usize,
+    rx_peak: f64,
+    rx_sq: f64,
+    tx_peak: f64,
+    keyed: bool,
+}
+
+impl Levels {
+    fn feed(&mut self, input: &[f64], output: &[f64], keyed: bool) {
+        for &x in input {
+            self.rx_peak = self.rx_peak.max(x.abs());
+            self.rx_sq += x * x;
+        }
+        self.n += input.len();
+        self.tx_peak = output.iter().fold(self.tx_peak, |m, &x| m.max(x.abs()));
+        self.keyed |= keyed;
+    }
+
+    fn line(&self) -> String {
+        let db = |v: f64| if v > 0.0 { format!("{:.1}", 20.0 * v.log10()) } else { "-inf".into() };
+        let rms = if self.n > 0 { (self.rx_sq / self.n as f64).sqrt() } else { 0.0 };
+        format!(
+            "level rx peak {} rms {} dBFS, tx peak {} dBFS, ptt {}",
+            db(self.rx_peak),
+            db(rms),
+            db(self.tx_peak),
+            if self.keyed { "on" } else { "off" }
+        )
+    }
 }
 
 impl<M: Modem> Tnc<M> {
@@ -73,6 +110,7 @@ impl<M: Modem> Tnc<M> {
             restart_at: None,
             rx: RxText::default(),
             modulation: String::new(),
+            levels: None,
         }
     }
 
@@ -90,6 +128,11 @@ impl<M: Modem> Tnc<M> {
 
     pub fn set_echo(&mut self, on: bool) {
         self.echo = on;
+    }
+
+    /// Writes the receive and transmit levels to the debug log file once a second.
+    pub fn set_level_log(&mut self, on: bool) {
+        self.levels = on.then(|| Levels { since: self.station.now(), ..Levels::default() });
     }
 
     pub fn restart_requested(&self) -> bool {
@@ -185,6 +228,17 @@ impl<M: Modem> Tnc<M> {
             }
         }
         self.publish(input, output);
+        self.log_levels(input, output, now);
+    }
+
+    fn log_levels(&mut self, input: &[f64], output: &[f64], now: Time) {
+        let keyed = self.keyed && !self.forced_off;
+        let Some(l) = self.levels.as_mut() else { return };
+        l.feed(input, output, keyed);
+        if now - l.since >= SECOND {
+            xara_host::log::file_only(format_args!("{:10.3} {}", secs(now), l.line()));
+            *l = Levels { since: now, ..Levels::default() };
+        }
     }
 
     fn limit_tune(&mut self, now: Time) {
