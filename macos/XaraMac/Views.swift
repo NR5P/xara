@@ -37,6 +37,7 @@ struct ModemView: View {
     @AppStorage("monitorCalls") private var monitorCalls = ""
     @AppStorage("monitorFrames") private var monitorFrames = false
     @AppStorage("autoStart") private var autoStart = false
+    @AppStorage("registered") private var registered = false
     @State private var loginItem = LoginItem.enabled
     @State private var devices = Devices.audio()
     @State private var serialPorts = Devices.serialPorts()
@@ -74,6 +75,8 @@ struct ModemView: View {
                         Text("\(Int(driveDb)) dB").monospacedDigit().frame(width: 50, alignment: .trailing)
                     }
                 }
+                Toggle("Registered (VARA licence)", isOn: $registered)
+                Text("Only with a registered copy of VARA: higher speeds, and links at full speed with other registered stations.").font(.caption).foregroundStyle(.secondary)
             }
             .disabled(modem.running)
 

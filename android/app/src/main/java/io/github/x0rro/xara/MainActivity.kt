@@ -169,6 +169,7 @@ fun ModemScreen() {
     var monitorCalls by remember { mutableStateOf(prefs.monitorCalls) }
     var debugLog by remember { mutableStateOf(prefs.debugLog) }
     var recordAudio by remember { mutableStateOf(prefs.recordAudio) }
+    var registered by remember { mutableStateOf(prefs.registered) }
     var problem by remember { mutableStateOf<String?>(null) }
     val inputs = rememberDevices(context, true)
     val outputs = rememberDevices(context, false)
@@ -188,7 +189,7 @@ fun ModemScreen() {
         prefs.driveDb = drive; prefs.lan = lan; prefs.uiControl = uiControl; prefs.allowBuiltIn = allowBuiltIn
         prefs.capture = capture; prefs.playback = playback
         prefs.monitor = monitor; prefs.monitorFrames = monitorFrames; prefs.monitorCalls = monitorCalls
-        prefs.debugLog = debugLog; prefs.recordAudio = recordAudio
+        prefs.debugLog = debugLog; prefs.recordAudio = recordAudio; prefs.registered = registered
         val builtIn = listOfNotNull(inputs.find { it.id == capture }, outputs.find { it.id == playback }).filter { it.builtIn }
         problem = when {
             inputs.none { it.id == capture } || outputs.none { it.id == playback } -> "Choose an audio input and output."
@@ -253,6 +254,8 @@ fun ModemScreen() {
             TextButton({ drive = (drive - 1).coerceAtLeast(-30) }, enabled = editable) { Text("−") }
             TextButton({ drive = (drive + 1).coerceAtMost(0) }, enabled = editable) { Text("+") }
         }
+        Toggle("Registered (VARA licence)", registered, editable) { registered = it }
+        Note("Only with a registered copy of VARA: higher speeds, and links at full speed with other registered stations.")
 
         Section("Radio")
         Choice("Audio in", inputs, inputs.find { it.id == capture }, { it?.label ?: "none" }, editable) { capture = it?.id ?: 0 }

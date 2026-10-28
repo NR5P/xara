@@ -64,6 +64,8 @@ struct ModemConfig {
     var monitor: Bool { Self.defaults.bool(forKey: "monitor") }
     var monitorCalls: [String] { calls(Self.defaults.string(forKey: "monitorCalls") ?? "") }
     var monitorFrames: Bool { Self.defaults.bool(forKey: "monitorFrames") }
+    /// Registered VARA speeds, for a user with a VARA licence.
+    var registered: Bool { Self.defaults.bool(forKey: "registered") }
 
     static var callValid: Bool {
         let c = ModemConfig().call.uppercased()
@@ -96,6 +98,7 @@ struct ModemConfig {
             if monitorFrames { a += ["--monitor-frames"] }
             for c in monitorCalls { a += ["--monitor-call", c] }
         }
+        if registered { a += ["--registered"] }
         a += ["--state-dir", Self.stateDir.path]
         return a
     }

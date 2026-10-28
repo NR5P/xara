@@ -54,6 +54,8 @@ struct ModemConfig {
     var record: URL?
     /// A timestamped text log of the modem: frames, host commands, audio levels once a second.
     var debugLog: URL?
+    /// Registered VARA speeds, for a user with a VARA licence.
+    var registered = false
 
     var arguments: [String] {
         var a = ["--call", call.uppercased()] + mode.options
@@ -71,6 +73,7 @@ struct ModemConfig {
         }
         if let r = record { a += ["--record", r.path] }
         if let d = debugLog { a += ["--debug-log", d.path] }
+        if registered { a += ["--registered"] }
         a += ["--state-dir", stateDir.path]
         return a
     }

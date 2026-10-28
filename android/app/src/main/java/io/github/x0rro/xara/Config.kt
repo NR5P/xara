@@ -44,6 +44,8 @@ data class ModemConfig(
     val debugLog: File? = null,
     /** A FLAC recording of the audio heard and sent, with PTT, for troubleshooting. */
     val record: File? = null,
+    /** Registered VARA speeds, for a user with a VARA licence. */
+    val registered: Boolean = false,
 ) {
     val callValid: Boolean
         get() = call.uppercase().matches(Regex("^[A-Z0-9]{3,7}(-[0-9]{1,2})?$")) && !call.uppercase().startsWith("N0CALL")
@@ -65,6 +67,7 @@ data class ModemConfig(
         }
         debugLog?.let { a += listOf("--debug-log", it.path) }
         record?.let { a += listOf("--record", it.path) }
+        if (registered) a += "--registered"
         a += listOf("--state-dir", stateDir.path)
         return a.toTypedArray()
     }
@@ -93,6 +96,7 @@ class Prefs(context: Context) {
     var monitorCalls by string("monitorCalls", "")
     var debugLog by bool("debugLog", false)
     var recordAudio by bool("recordAudio", false)
+    var registered by bool("registered", false)
 
     /** A token kept across launches, so a bookmarked controlling web UI keeps working. */
     val uiToken: String
@@ -113,6 +117,7 @@ class Prefs(context: Context) {
         } else {
             null
         },
+        registered = registered,
     )
 
     private fun string(k: String, d: String) = object : kotlin.properties.ReadWriteProperty<Any?, String> {

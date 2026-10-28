@@ -8,14 +8,14 @@ root=$(cd "$(dirname "$0")/.." && pwd)
 export PATH="$HOME/.cargo/bin:$PATH"
 export IPHONEOS_DEPLOYMENT_TARGET=${IPHONEOS_DEPLOYMENT_TARGET:-17.0}
 if [ "${1:-}" = --target ]; then
-	exec cargo build --manifest-path "$root/Cargo.toml" --locked --release -p xara-ffi --target "$2"
+	exec cargo build --manifest-path "$root/Cargo.toml" --locked --release -p xara-ffi --features registered --target "$2"
 fi
 profile=${1:-release}
 flag=
 [ "$profile" = release ] && flag=--release
 out="$root/ios/build"
 for t in aarch64-apple-ios aarch64-apple-ios-sim; do
-	cargo build --manifest-path "$root/Cargo.toml" --locked $flag -p xara-ffi --target "$t"
+	cargo build --manifest-path "$root/Cargo.toml" --locked $flag -p xara-ffi --features registered --target "$t"
 done
 lib() { echo "$root/target/$1/$profile/libxara_ffi.a"; }
 # Skip repackaging when neither library changed, so Xcode builds stay quick.

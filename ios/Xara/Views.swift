@@ -14,6 +14,7 @@ struct ModemView: View {
     @AppStorage("monitorCalls") private var monitorCalls = ""
     @AppStorage("recordAudio") private var recordAudio = false
     @AppStorage("debugLog") private var debugLog = false
+    @AppStorage("registered") private var registered = false
     @AppStorage("monitorFrames") private var monitorFrames = false
     @AppStorage("allowBuiltIn") private var allowBuiltIn = false
     @State private var addresses: [String] = []
@@ -50,6 +51,8 @@ struct ModemView: View {
                     Stepper(value: $driveDb, in: -30...0, step: 1) {
                         LabeledContent("TX drive", value: "\(Int(driveDb)) dB")
                     }
+                    Toggle("Registered (VARA licence)", isOn: $registered)
+                    Text("Only with a registered copy of VARA: higher speeds, and links at full speed with other registered stations.").font(.caption).foregroundStyle(.secondary)
                 }
                 .disabled(modem.running)
                 Section {
@@ -140,7 +143,8 @@ struct ModemView: View {
             uiControl: uiControl, uiToken: UiToken.value, stateDir: UiToken.stateDir,
             monitor: monitor, monitorCalls: calls(monitorCalls), monitorFrames: monitorFrames,
             record: recordAudio ? Recordings.next() : nil,
-            debugLog: debugLog ? Recordings.debugLog : nil)
+            debugLog: debugLog ? Recordings.debugLog : nil,
+            registered: registered)
     }
 }
 

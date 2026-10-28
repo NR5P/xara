@@ -144,7 +144,7 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
-			shellScript = "export PATH=\"$HOME/.cargo/bin:$PATH\"\ncargo build --manifest-path \"$SRCROOT/../Cargo.toml\" --locked --release -p xara-ffi\n";
+			shellScript = "export PATH=\"$HOME/.cargo/bin:$PATH\"\ncargo build --manifest-path \"$SRCROOT/../Cargo.toml\" --locked --release -p xara-ffi --features registered\n";
 		};
 /* End PBXShellScriptBuildPhase section */
 
