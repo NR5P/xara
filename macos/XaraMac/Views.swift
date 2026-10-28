@@ -38,6 +38,9 @@ struct ModemView: View {
     @AppStorage("monitorFrames") private var monitorFrames = false
     @AppStorage("autoStart") private var autoStart = false
     @AppStorage("registered") private var registered = false
+    @AppStorage("audioLatencyMs") private var audioLatencyMs = 0
+    @AppStorage("debugLog") private var debugLog = false
+    @AppStorage("recordAudio") private var recordAudio = false
     @State private var loginItem = LoginItem.enabled
     @State private var devices = Devices.audio()
     @State private var serialPorts = Devices.serialPorts()
@@ -110,6 +113,9 @@ struct ModemView: View {
                     Stepper("PTT lead \(leadMs) ms", value: $leadMs, in: 0...1000, step: 10)
                     Stepper("PTT tail \(tailMs) ms", value: $tailMs, in: 0...1000, step: 10)
                 }
+                Stepper("Audio delay \(audioLatencyMs) ms", value: $audioLatencyMs, in: 0...1000, step: 50)
+                Text("Round-trip delay in the audio path that xara does not add itself, such as network audio or two phones on their own speakers (about 500). Leave at 0 for a radio on a USB interface.")
+                    .font(.caption).foregroundStyle(.secondary)
                 Button("Refresh devices") {
                     devices = Devices.audio()
                     serialPorts = Devices.serialPorts()
@@ -134,6 +140,11 @@ struct ModemView: View {
                     .pickerStyle(.segmented)
                     TextField("Calls to name (optional)", text: $monitorCalls)
                 }
+                Toggle("Record received audio", isOn: $recordAudio)
+                Toggle("Keep a debug log", isOn: $debugLog)
+                if recordAudio || debugLog {
+                    Button("Show in Finder") { NSWorkspace.shared.open(ModemConfig.logsDir) }
+                }
             } header: {
                 Text("Receive")
             } footer: {
@@ -141,8 +152,8 @@ struct ModemView: View {
                     ? "The Received tab always shows your own links. With this on it also decodes VARA HF traffic "
                         + "between other stations, like VARA's monitor. Answering stations show as #hash unless "
                         + "their call is listed, separated by spaces. Every packet lists each frame heard, as "
-                        + "VARA's monitor does."
-                    : "Showing other stations' traffic is for VARA HF; FM shows your own links only.")
+                        + "VARA's monitor does. " + troubleshootingNote
+                    : "Showing other stations' traffic is for VARA HF; FM shows your own links only. " + troubleshootingNote)
                     .font(.caption).foregroundStyle(.secondary)
             }
             .disabled(modem.running)
@@ -185,6 +196,12 @@ struct ModemView: View {
         .onChange(of: radio) { _, _ in
             if !outputs.contains(where: { $0.uid == playback }) { playback = outputs.first?.uid ?? "" }
         }
+    }
+
+    private var troubleshootingNote: String {
+        "Recording saves what the modem hears and sends (about 3 MB a minute); the debug log adds a "
+            + "timestamped line for every frame, host command and, once a second, the audio levels. Both go "
+            + "to ~/Library/Logs/xara."
     }
 
     private var clientsFooter: String {

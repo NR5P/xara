@@ -66,6 +66,10 @@ struct ModemConfig {
     var monitorFrames: Bool { Self.defaults.bool(forKey: "monitorFrames") }
     /// Registered VARA speeds, for a user with a VARA licence.
     var registered: Bool { Self.defaults.bool(forKey: "registered") }
+    /// Delay in the audio path that xara does not add (a network audio link, a phone's speaker and mic).
+    var audioLatencyMs: Int { Self.defaults.integer(forKey: "audioLatencyMs") }
+    var debugLog: Bool { Self.defaults.bool(forKey: "debugLog") }
+    var recordAudio: Bool { Self.defaults.bool(forKey: "recordAudio") }
 
     static var callValid: Bool {
         let c = ModemConfig().call.uppercased()
@@ -99,8 +103,22 @@ struct ModemConfig {
             for c in monitorCalls { a += ["--monitor-call", c] }
         }
         if registered { a += ["--registered"] }
+        if audioLatencyMs > 0 { a += ["--audio-latency-ms", "\(audioLatencyMs)"] }
+        if debugLog { a += ["--debug-log", Self.logsDir.appendingPathComponent("debug.log").path] }
+        if recordAudio {
+            let f = DateFormatter()
+            f.dateFormat = "yyyyMMdd-HHmmss"
+            a += ["--record", Self.logsDir.appendingPathComponent("xara-\(f.string(from: Date())).flac").path]
+        }
         a += ["--state-dir", Self.stateDir.path]
         return a
+    }
+
+    /// The debug log and recordings: ~/Library/Logs/xara, which Console.app also shows.
+    static var logsDir: URL {
+        let d = FileManager.default.urls(for: .libraryDirectory, in: .userDomainMask)[0].appendingPathComponent("Logs/xara")
+        try? FileManager.default.createDirectory(at: d, withIntermediateDirectories: true)
+        return d
     }
 
     static var stateDir: URL {
