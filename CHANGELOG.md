@@ -14,6 +14,8 @@
   decode other stations' VARA HF traffic (`--monitor-call` names them) at
   500 and 2300 Hz at once; `--monitor-frames` lists every frame heard, as the
   apps' *Every packet* setting; the Android app gets the Received tab too
+- the web UI (in every app) names the link's modulation, e.g. "OFDM 49
+  carriers · 16QAM", and monitor mode's DATA lines do too
 
 ## 0.1.1
 

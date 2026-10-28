@@ -103,6 +103,7 @@ function status(s) {
   $("level").textContent = linked ? s.level : "-";
   $("bps").textContent = s.bitrate ? s.bitrate.bps : "-";
   $("dir").textContent = s.bitrate ? (s.bitrate.tx ? "bps TX" : "bps RX") : "";
+  $("modulation").textContent = linked && s.bitrate && s.bitrate.modulation ? s.bitrate.modulation : "-";
   $("sn").textContent = s.sn === null ? "-" : s.sn.toFixed(1);
   $("afc").textContent = s.afc === null ? "-" : (s.afc > 0 ? "+" : "") + s.afc.toFixed(1);
   $("tries").textContent = `${s.attempts} / ${s.retries}`;

@@ -62,11 +62,13 @@ pub struct Link {
     pub afc_hz: Option<f64>,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Bitrate {
     pub level: usize,
     pub bps: u32,
     pub tx: bool,
+    /// The level's waveform, e.g. "OFDM 49 carriers · 16QAM".
+    pub modulation: String,
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]

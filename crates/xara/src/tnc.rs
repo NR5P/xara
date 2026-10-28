@@ -49,6 +49,8 @@ pub struct Tnc<M: Modem> {
     restart: bool,
     restart_at: Option<Time>,
     rx: RxText,
+    /// The waveform of the last BITRATE, which the host protocol has no room for.
+    modulation: String,
 }
 
 impl<M: Modem> Tnc<M> {
@@ -70,6 +72,7 @@ impl<M: Modem> Tnc<M> {
             restart: false,
             restart_at: None,
             rx: RxText::default(),
+            modulation: String::new(),
         }
     }
 
@@ -309,7 +312,10 @@ impl<M: Modem> Tnc<M> {
         let Some(t) = &self.telemetry else { return };
         match r {
             Response::Sn(sn) => t.update(|s| s.sn = Some(sn)),
-            Response::Bitrate { level, bps, tx } => t.update(|s| s.bitrate = Some(Bitrate { level, bps, tx })),
+            Response::Bitrate { level, bps, tx } => {
+                let modulation = self.modulation.clone();
+                t.update(|s| s.bitrate = Some(Bitrate { level, bps, tx, modulation }))
+            }
             Response::Disconnected => t.update(|s| (s.sn, s.bitrate) = (None, None)),
             _ => {}
         }
@@ -505,7 +511,10 @@ impl<M: Modem> Tnc<M> {
                         k.send(cmd.byte(), &data);
                     }
                 }
-                Report::Bitrate { level, bps, tx } => self.say(Response::Bitrate { level, bps, tx }),
+                Report::Bitrate { level, bps, tx, modulation } => {
+                    self.modulation = modulation;
+                    self.say(Response::Bitrate { level, bps, tx });
+                }
                 Report::Host(HostEvent::Data(d)) => {
                     self.rx.data(&d);
                     self.host.data(&d);

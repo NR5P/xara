@@ -67,5 +67,7 @@ fn other_stations_traffic_at(link_bw: Bandwidth, modem_bw: Bandwidth, frames: bo
     let tagged = format!("[{}] CALLER", link_bw.hz());
     assert_eq!(text.contains(&tagged), frames, "{text}");
     assert_eq!(text.contains(&format!("[{}] DATA", link_bw.hz())), frames, "{text}");
+    // and data frames name their modulation.
+    assert_eq!(text.contains(" · OFDM ") || text.contains(" · FSK") || text.contains(" carrier"), frames, "{text}");
     assert!(text.contains("QSL on the 20m net, 73"), "{text}");
 }

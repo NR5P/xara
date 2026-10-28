@@ -10,7 +10,7 @@ use std::thread::{self, JoinHandle};
 
 use crate::monitor::record::{Body, Record};
 use crate::monitor::{Line, Monitor, MonitorOpts};
-use xara_phy::hf::level::Bandwidth;
+use xara_phy::hf::level::{Bandwidth, Record as Level};
 
 type Sink = Arc<dyn Fn(&str) + Send + Sync>;
 
@@ -236,7 +236,7 @@ impl Heard {
             }
             Record::Cq { line, .. } if self.first => Some(format!("{line}\n")),
             Record::Cq { .. } => None,
-            Record::Data { frames, .. } => {
+            Record::Data { frames, level, .. } => {
                 // Every decoder sees every burst; only the one at its bandwidth decodes frames ('+').
                 let ok = frames.chars().filter(|&c| c == '+').count();
                 BURSTS.fetch_add(1, Ordering::SeqCst);
@@ -248,7 +248,10 @@ impl Heard {
                         None
                     }
                     (0, _, _) | (_, true, _) => None,
-                    _ => Some(tag(&l.text)),
+                    _ => {
+                        let m = self.bw.level(Level::clamped(*level, Level::MAX)).modulation();
+                        Some(tag(&format!("{} · {m}", l.text.trim_end())))
+                    }
                 }
             }
             Record::Summary(_) => None,

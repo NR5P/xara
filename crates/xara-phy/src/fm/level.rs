@@ -348,6 +348,11 @@ impl Level {
         self.layout.bps > 2
     }
 
+    /// What a person would call this level's waveform, e.g. "OFDM 58 carriers · 16QAM".
+    pub fn modulation(&self) -> String {
+        format!("OFDM {} carriers · {}", self.layout.nc, crate::hf::level::constellation(self.layout.bps))
+    }
+
     pub const fn puncture_period(&self) -> u32 {
         puncture_period(self.rate)
     }
