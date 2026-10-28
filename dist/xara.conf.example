@@ -66,6 +66,27 @@
 #ptt = dtr:/dev/serial/by-id/usb-XXXX-if00
 
 ###
+# registered copy of VARA: full speed with other registered stations
+
+#registered
+
+###
+# extras, also switches in the web UI's settings
+
+# round-trip delay in the audio path that xara does not add (network audio;
+# two phones on their own speakers: 500). leave out for a radio on USB.
+#audio-latency-ms = 500
+
+# print received text, and decode other stations' VARA HF traffic too
+#monitor
+#monitor-frames
+#monitor-call = W1AW
+
+# troubleshooting: record rx/tx audio, keep a timestamped debug log
+#record = /var/lib/xara/STATION/xara.flac
+#debug-log = /var/lib/xara/STATION/debug.log
+
+###
 # web UI
 
 # xara logs http://...:8080/?token=... at startup, click it!

@@ -193,10 +193,46 @@ fn build(argv: &[String], saved: &Pairs) -> Result<Args, String> {
         if !settings::KEYS.contains(&k.as_str()) {
             return Err(format!("unknown setting {k}"));
         }
-        take(&mut a, &format!("--{k}"), || Ok(v.clone()))?;
+        let flag = format!("--{k}");
+        match k.as_str() {
+            "debug-log" | "record" => {
+                let p = match v.as_str() {
+                    "yes" => Some(state_dir(&a).ok_or(format!("{k} needs a state directory"))?.join(saved_file(k))),
+                    _ => None,
+                };
+                if k == "record" { a.record = p } else { a.debug_log = p }
+            }
+            "monitor-call" => {
+                a.heard.clear();
+                for c in v.split_whitespace() {
+                    take(&mut a, &flag, || Ok(c.to_string()))?;
+                }
+            }
+            _ if settings::SWITCHES.contains(&k.as_str()) && v == "no" => *switch(&mut a, k) = false,
+            _ => take(&mut a, &flag, || Ok(v.clone()))?,
+        }
     }
     check(&a)?;
     Ok(a)
+}
+
+fn switch<'a>(a: &'a mut Args, k: &str) -> &'a mut bool {
+    match k {
+        "registered" => &mut a.registered,
+        "monitor" => &mut a.monitor,
+        _ => &mut a.monitor_frames,
+    }
+}
+
+/// Where the debug-log and record settings write, in the state directory: one log, and a
+/// recording for each start, named by its UTC time as the macOS app names them.
+fn saved_file(k: &str) -> String {
+    if k == "debug-log" {
+        return "debug.log".into();
+    }
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs());
+    let t: String = record::utc(now).chars().filter(char::is_ascii_digit).collect();
+    format!("xara-{}-{}.flac", &t[..8], &t[8..])
 }
 
 fn check(a: &Args) -> Result<(), String> {
@@ -387,10 +423,20 @@ fn effective(a: &Args) -> Pairs {
         ("ptt-lead-ms", a.timing.lead.as_millis().to_string()),
         ("ptt-tail-ms", a.timing.tail.as_millis().to_string()),
         ("audio-latency-ms", a.audio_latency.as_millis().to_string()),
+        ("registered", yes(a.registered)),
+        ("monitor", yes(a.monitor)),
+        ("monitor-frames", yes(a.monitor_frames)),
+        ("monitor-call", a.heard.join(" ")),
+        ("debug-log", yes(a.debug_log.is_some())),
+        ("record", yes(a.record.is_some())),
     ]
     .into_iter()
     .map(|(k, v)| (k.to_string(), v))
     .collect()
+}
+
+fn yes(on: bool) -> String {
+    (if on { "yes" } else { "no" }).into()
 }
 
 fn devices(b: Backend) -> std::io::Result<Devices> {
@@ -926,6 +972,26 @@ mod tests {
         let saved = vec![("audio-latency-ms".to_string(), "250".to_string())];
         let b = with_saved(&argv("--call N2CALL --capture c --playback p"), &saved, false).unwrap();
         assert_eq!(b.audio_latency, Duration::from_millis(250));
+    }
+
+    #[test]
+    fn saved_switches_turn_options_on_and_off() {
+        let base = argv("--call N2CALL --capture c --playback p --monitor --monitor-call W1AW --registered");
+        let a =
+            with_saved(&base, &kv(&[("monitor-frames", "yes"), ("monitor-call", "N1CALL K1ABC-7")]), false).unwrap();
+        assert!(a.registered && a.monitor && a.monitor_frames);
+        assert_eq!(a.heard, ["N1CALL", "K1ABC-7"]);
+        let b = with_saved(&base, &kv(&[("registered", "no"), ("monitor", "no")]), false).unwrap();
+        assert!(!b.registered && !b.monitor);
+        assert!(with_saved(&base, &kv(&[("monitor", "no"), ("monitor-frames", "yes")]), false).is_err());
+        assert!(with_saved(&base, &kv(&[("debug-log", "yes")]), false).is_err_and(|e| e.contains("state directory")));
+        let dir = argv("--call N2CALL --capture c --playback p --state-dir /var/lib/xara/x --record /tmp/a.flac");
+        let c = with_saved(&dir, &kv(&[("debug-log", "yes"), ("record", "no")]), false).unwrap();
+        assert_eq!(c.debug_log.as_deref(), Some(Path::new("/var/lib/xara/x/debug.log")));
+        assert_eq!(c.record, None);
+        let r = with_saved(&dir, &kv(&[("record", "yes")]), false).unwrap().record.unwrap();
+        assert!(r.starts_with("/var/lib/xara/x") && r.extension().is_some_and(|e| e == "flac"));
+        assert_eq!(effective(&c).iter().find(|(k, _)| k == "debug-log").unwrap().1, "yes");
     }
 
     #[test]

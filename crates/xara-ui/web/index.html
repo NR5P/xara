@@ -105,6 +105,23 @@
       <label>Playback device <input name="playback" list="dev-playback" spellcheck="false"></label>
       <label>PTT lead (ms) <input name="ptt-lead-ms" type="number" min="0" max="1000" step="10"></label>
       <label>PTT tail (ms) <input name="ptt-tail-ms" type="number" min="0" max="1000" step="10"></label>
+      <label>Audio delay (ms) <input name="audio-latency-ms" type="number" min="0" max="1000" step="50"></label>
+      <label>Registered (VARA licence)
+        <select name="registered"><option value="">command line</option><option value="yes">on</option><option value="no">off</option></select>
+      </label>
+      <label id="set-monitor">Show other stations' traffic
+        <select name="monitor"><option value="">command line</option><option value="yes">on</option><option value="no">off</option></select>
+      </label>
+      <label id="set-frames">Every packet (not just text)
+        <select name="monitor-frames"><option value="">command line</option><option value="yes">on</option><option value="no">off</option></select>
+      </label>
+      <label id="set-calls">Calls to name <input name="monitor-call" spellcheck="false"></label>
+      <label>Record received audio
+        <select name="record"><option value="">command line</option><option value="yes">on</option><option value="no">off</option></select>
+      </label>
+      <label>Keep a debug log
+        <select name="debug-log"><option value="">command line</option><option value="yes">on</option><option value="no">off</option></select>
+      </label>
     </form>
     <datalist id="dev-capture"></datalist>
     <datalist id="dev-playback"></datalist>
@@ -116,6 +133,16 @@
     <p id="set-msg" class="hint"></p>
     <p class="hint">Empty fields use the command line (shown greyed). xara restarts only while idle, which takes a few
       seconds; if saved settings fail to start, it falls back to the command line and says so here.</p>
+    <p class="hint">Registered is for a user with a registered copy of VARA: links with other registered stations
+      run at full speed. Audio delay is the round trip in the audio path that xara does not add itself, such as
+      network audio (two phones on their own speakers: about 500); leave it at 0 for a radio on a USB interface.</p>
+    <p class="hint" id="set-monitor-hint">Showing other stations' traffic decodes VARA HF links between other
+      stations, like VARA's monitor, and prints them with your own links' text to xara's output (journalctl -u
+      xara@STATION -f for the system service). Answering stations show as #hash unless their call is listed,
+      separated by spaces. Every packet lists each frame heard.</p>
+    <p class="hint">Recording saves what the modem hears and sends (about 3 MB a minute); the debug log adds a
+      timestamped line for every frame, host command and, once a second, the audio levels. Both go next to the
+      settings file.</p>
   </section>
 </main>
 <script src="common.js"></script>

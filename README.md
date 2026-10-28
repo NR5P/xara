@@ -136,7 +136,7 @@ see [android/README.md](android/README.md) for the details.
     --kiss-port N|off       KISS TCP port (default: 8100)
     --persistence P         KISS p-persistence
 
-    --registered            enable registered speeds (must set build flag)
+    --registered            registered speeds, for a user with a VARA licence
 
     --digi CALL             FM digipeat for CALL (default: off)
     --record PATH           record rx, tx and PTT to FLAC (or WAV if .wav)
@@ -214,8 +214,22 @@ options:
 
 ## registered mode
 
-compile with the `registered` feature for higher speeds if you have a
-registered copy of VARA, then run with `xara --registered ...`.
+if you have a registered copy of VARA, run with `xara --registered ...` (or
+`registered` in the config file, or turn on *Registered (VARA licence)* in the
+web UI's settings) so links with other registered stations run at full speed.
+it is off unless you turn it on. the `registered` feature is built in by
+default; `--no-default-features --features pulse,alsa` leaves it out.
+
+## web UI settings
+
+with `--ui-control`, the web UI's settings card saves to the state directory
+and restarts xara, as the apps' settings do: call, bandwidth, audio devices,
+PTT timing, audio delay, *Registered (VARA licence)*, *Show other stations'
+traffic* with *Every packet* and calls to name (HF), *Record received audio*
+and *Keep a debug log*. the last two write `xara-DATE-TIME.flac` and
+`debug.log` next to the settings file (`/var/lib/xara/STATION/` for the
+system service). each switch can be left to the command line, or turned on
+or off over it.
 
 ## copyright
 
