@@ -57,7 +57,10 @@ pub fn unpack_call(b: &[u8]) -> Option<String> {
             _ => ' ',
         })
         .collect();
-    Some(s.trim_end().to_string())
+    // The packing has only letters and digits, so an SSID's `-` (or a `/`) went out as a blank.
+    // A blank inside the call can only be that separator; `-` is the one call signs use, and
+    // restoring it gives back the call the sender hashes ("NR5P 1" -> "NR5P-1").
+    Some(s.trim().replace(' ', "-"))
 }
 
 #[cfg(test)]
@@ -69,5 +72,17 @@ mod tests {
         assert_eq!(call_hash(b"N0CALL"), 0xD80986);
         assert_eq!(call_hash(b""), 0);
         assert_eq!(pack_call(b"N0CALL"), [0x39, 0xb0, 0xc1, 0x30, 0xc0, 0x00]);
+    }
+
+    #[test]
+    fn ssid_round_trips() {
+        // The packed form is VARA's (vectors/crc_hash_pack.json): the `-` is a blank.
+        assert_eq!(pack_call(b"N0CALL-1"), [0x39, 0xb0, 0xc1, 0x30, 0xc0, 0x1c]);
+        for call in ["N0CALL-1", "NR5P-1", "W1AW-10", "K1A-5", "N0CALL", "W1AW", "1", ""] {
+            let back = unpack_call(&pack_call(call.as_bytes())).unwrap();
+            assert_eq!(back, call);
+            // The answerer keys the link on the hash of what it unpacked; it must be the caller's own.
+            assert_eq!(call_hash(back.as_bytes()), call_hash(call.as_bytes()), "{call}");
+        }
     }
 }

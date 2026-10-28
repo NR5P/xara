@@ -141,3 +141,27 @@ fn ptt_lead_is_absorbed() {
         assert!(after.top_tx(0) >= 10 && after.secs() < 100.0, "lead {ms:?}: {:.1} s\n{}", after.secs(), after.trace());
     }
 }
+
+/// Call signs with an SSID, as Winlink stations and P2P partners use. The header carries the
+/// caller's call packed into letters and digits only (the `-` becomes a blank, as in VARA),
+/// so the answerer has to restore the `-` to key the link on the same call hash as the caller.
+#[test]
+fn ssid_calls_link_over_audio() {
+    for (a, b) in [("NR5P-1", "NR5P-2"), ("N0CALL", "W1AW-10")] {
+        let cfg = |call: &str, seed| Config { seed, ..Config::new(Bandwidth::Hz2300, call) };
+        let mut air = Air::pair(
+            [Station::new(cfg(a, 3), Options::default()), Station::new(cfg(b, 5), Options::default())],
+            [2400, 2400],
+            0.002,
+            |r| matches!(r, Report::Host(HostEvent::Buffer(_) | HostEvent::Sn(_))),
+        );
+        air.st[0].connect(a, b, &[]);
+        let line = Report::Host(HostEvent::Connected { caller: a.into(), answerer: b.into(), vias: Vec::new(), bw: Bandwidth::Hz2300.into() });
+        assert!(air.run_until(40.0, |x| x.has(0, &line) && x.has(1, &line)), "{a} -> {b}:\n{}", air.trace());
+        let (pa, pb) = (payload(300, 77), payload(120, 78));
+        air.st[0].send(&pa);
+        air.st[1].send(&pb);
+        assert!(air.run_until(60.0, |x| x.got[1].len() >= pa.len() && x.got[0].len() >= pb.len()), "{a} -> {b}:\n{}", air.trace());
+        assert_eq!((&air.got[1], &air.got[0]), (&pa, &pb));
+    }
+}
