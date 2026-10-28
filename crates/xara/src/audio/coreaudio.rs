@@ -15,10 +15,23 @@ const BUFFER_FRAMES: usize = BLOCK;
 const TX_TARGET: usize = 2 * BLOCK;
 const RX_LIMIT: usize = 2 * RATE as usize;
 
+/// Reads and writes go in lockstep and the modem takes sample k of each as the same instant, so
+/// capture has to stay as far behind real time as playback does. Two things put playback further
+/// behind, and capture skips the same audio to match: the device's start (capture runs, and
+/// piles up, before playback does) and playback running dry (silence the modem never wrote).
+/// Without this, every reply reached the modem late by the difference, after it had stopped
+/// listening for it. ALSA and AAudio read the device directly and have no such queue.
 #[derive(Default)]
 struct State {
     rx: VecDeque<i16>,
     tx: VecDeque<i16>,
+    /// The playback buffers are primed; the next drained callback is the device playing.
+    armed: bool,
+    started: bool,
+    /// Drop what capture holds beyond the next block: playback has just started.
+    flush: bool,
+    /// Captured samples to drop: the silence playback filled in.
+    skip: usize,
 }
 
 #[derive(Default)]
@@ -68,6 +81,12 @@ extern "C" fn drained(user: *mut c_void, q: QueueRef, b: *mut QueueBuffer) {
             *o = v;
         }
         out[n..].fill(0);
+        if st.started {
+            st.skip = (st.skip + out.len() - n).min(RX_LIMIT);
+        } else if st.armed {
+            st.started = true;
+            st.flush = true;
+        }
         drop(st);
         buf.size = buf.capacity;
         sh.moved.notify_all();
@@ -190,6 +209,7 @@ impl CoreAudioIo {
                     let b = p.allocate(bytes)?;
                     drained(user, p.raw(), b);
                 }
+                shared.lock().armed = true;
                 Some(p)
             }
             None => None,
@@ -209,6 +229,24 @@ impl Audio for CoreAudioIo {
         while st.rx.len() < x.len() {
             let wait = remaining(until, "capture (no audio)")?;
             st = self.shared.moved.wait_timeout(st, wait).unwrap_or_else(PoisonError::into_inner).0;
+        }
+        // See State: keep capture as far behind as playback.
+        let spare = st.rx.len() - x.len();
+        let ms = |n: usize| n * 1000 / RATE as usize;
+        if st.flush {
+            st.flush = false;
+            st.skip = 0;
+            st.rx.drain(..spare);
+            if spare >= BLOCK {
+                crate::say!("playback started {} ms after capture; capture skipped ahead to match", ms(spare));
+            }
+        } else if st.skip > 0 {
+            let n = st.skip.min(spare);
+            st.rx.drain(..n);
+            st.skip -= n;
+            if n >= 5 * BLOCK {
+                crate::say!("playback ran dry for {} ms; capture skipped ahead to match", ms(n));
+            }
         }
         let n = x.len();
         for (v, s) in x.iter_mut().zip(st.rx.drain(..n)) {
