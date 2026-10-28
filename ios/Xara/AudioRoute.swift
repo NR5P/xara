@@ -6,10 +6,19 @@ enum AudioRoute {
     /// Raw audio at 48 kHz with no voice processing, so the modem hears what the radio sends.
     static func activate() throws {
         let s = AVAudioSession.sharedInstance()
-        try s.setCategory(.playAndRecord, mode: .measurement, options: [])
+        // Without .defaultToSpeaker, play-and-record on the iPhone's own hardware goes to the
+        // earpiece, far too quiet for another device to decode. A USB interface still takes the
+        // route when one is connected.
+        try s.setCategory(.playAndRecord, mode: .measurement, options: [.defaultToSpeaker])
         try s.setPreferredSampleRate(48_000)
         try s.setPreferredIOBufferDuration(0.01)
         try s.setActive(true)
+        // The built-in mic at the bottom, beside the speaker: where another phone's speaker faces.
+        // This only picks among the built-in mics; it does not take the route from an interface.
+        if let mic = s.availableInputs?.first(where: { $0.portType == .builtInMic }),
+           let bottom = mic.dataSources?.first(where: { $0.orientation == .bottom }) {
+            try? mic.setPreferredDataSource(bottom)
+        }
         if s.isInputGainSettable { try? s.setInputGain(0.5) }
     }
 
