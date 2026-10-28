@@ -172,10 +172,13 @@ fun ModemScreen() {
     val outputs = rememberDevices(context, false)
     var capture by remember { mutableIntStateOf(prefs.capture) }
     var playback by remember { mutableIntStateOf(prefs.playback) }
-    // Default to a USB interface when nothing usable is chosen.
+    // Default to a USB interface when nothing usable is chosen; without one, the phone's
+    // speaker rather than the earpiece.
     LaunchedEffect(inputs, outputs) {
         if (inputs.none { it.id == capture }) capture = (inputs.firstOrNull { it.usb } ?: inputs.firstOrNull())?.id ?: 0
-        if (outputs.none { it.id == playback }) playback = (outputs.firstOrNull { it.usb } ?: outputs.firstOrNull())?.id ?: 0
+        if (outputs.none { it.id == playback }) {
+            playback = (outputs.firstOrNull { it.usb } ?: outputs.firstOrNull { it.speaker } ?: outputs.firstOrNull())?.id ?: 0
+        }
     }
 
     val start = {
