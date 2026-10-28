@@ -141,7 +141,8 @@ see [android/README.md](android/README.md) for the details.
     --digi CALL             FM digipeat for CALL (default: off)
     --record PATH           record rx, tx and PTT to FLAC (or WAV if .wav)
     --audio-latency-ms N    allow for N ms of delay in the audio path that xara
-                            does not add (a phone's own speaker and mic: ~300)
+                            does not add, round trip (two phones on their own
+                            speakers and mics: ~500)
     --debug-log PATH        append a timestamped log to PATH: every line xara
                             logs, frames heard and sent, and once a second the
                             rx and tx audio levels
