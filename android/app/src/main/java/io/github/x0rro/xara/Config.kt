@@ -103,7 +103,7 @@ class Prefs(context: Context) {
 }
 
 /** An audio device as the app offers it; xara opens it by id. */
-data class Device(val id: Int, val label: String, val builtIn: Boolean, val usb: Boolean)
+data class Device(val id: Int, val label: String, val builtIn: Boolean, val usb: Boolean, val speaker: Boolean = false)
 
 object AudioDevices {
     private val builtInTypes = setOf(
@@ -118,12 +118,17 @@ object AudioDevices {
         val am = context.getSystemService(AudioManager::class.java)
         val flag = if (inputs) AudioManager.GET_DEVICES_INPUTS else AudioManager.GET_DEVICES_OUTPUTS
         return am.getDevices(flag).map {
-            val kind = when {
-                it.type in usbTypes -> "USB"
-                it.type in builtInTypes -> "built-in"
-                else -> "type ${it.type}"
+            // Built-in devices all carry the phone's model as their product name, so name them
+            // by what they are: the earpiece is far too quiet to be heard by another device.
+            val label = when (it.type) {
+                AudioDeviceInfo.TYPE_BUILTIN_SPEAKER -> "Phone speaker"
+                AudioDeviceInfo.TYPE_BUILTIN_EARPIECE -> "Phone earpiece"
+                AudioDeviceInfo.TYPE_BUILTIN_MIC -> "Phone mic" + (it.address.takeIf { a -> a.isNotEmpty() }?.let { a -> " ($a)" } ?: "")
+                AudioDeviceInfo.TYPE_TELEPHONY -> "Phone call audio"
+                in usbTypes -> "${it.productName} (USB)"
+                else -> "${it.productName} (type ${it.type})"
             }
-            Device(it.id, "${it.productName} ($kind)", it.type in builtInTypes, it.type in usbTypes)
+            Device(it.id, label, it.type in builtInTypes, it.type in usbTypes, it.type == AudioDeviceInfo.TYPE_BUILTIN_SPEAKER)
         }
     }
 }
