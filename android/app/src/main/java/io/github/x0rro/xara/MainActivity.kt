@@ -3,7 +3,10 @@ package io.github.x0rro.xara
 import android.Manifest
 import android.annotation.SuppressLint
 import android.content.Context
+import android.content.BroadcastReceiver
 import android.content.Intent
+import android.content.IntentFilter
+import android.hardware.usb.UsbManager
 import android.content.pm.PackageManager
 import android.media.AudioDeviceCallback
 import android.media.AudioDeviceInfo
@@ -84,6 +87,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.core.content.ContextCompat
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -150,6 +154,23 @@ fun rememberDevices(context: Context, inputs: Boolean): List<Device> {
     return devices
 }
 
+/** USB serial adapters, kept current as they are plugged in and out. */
+@Composable
+fun rememberSerialPorts(context: Context): List<String> {
+    var ports by remember { mutableStateOf(TrusdxPort.drivers(context).map(TrusdxPort::label)) }
+    DisposableEffect(Unit) {
+        val r = object : BroadcastReceiver() {
+            override fun onReceive(c: Context, i: Intent) {
+                ports = TrusdxPort.drivers(context).map(TrusdxPort::label)
+            }
+        }
+        val f = IntentFilter(UsbManager.ACTION_USB_DEVICE_ATTACHED).apply { addAction(UsbManager.ACTION_USB_DEVICE_DETACHED) }
+        ContextCompat.registerReceiver(context, r, f, ContextCompat.RECEIVER_NOT_EXPORTED)
+        onDispose { context.unregisterReceiver(r) }
+    }
+    return ports
+}
+
 @Composable
 fun ModemScreen() {
     val context = LocalContext.current
@@ -170,6 +191,8 @@ fun ModemScreen() {
     var debugLog by remember { mutableStateOf(prefs.debugLog) }
     var recordAudio by remember { mutableStateOf(prefs.recordAudio) }
     var registered by remember { mutableStateOf(prefs.registered) }
+    var hookup by remember { mutableStateOf(Hookup.valueOf(prefs.hookup)) }
+    val serialPorts = rememberSerialPorts(context)
     var problem by remember { mutableStateOf<String?>(null) }
     val inputs = rememberDevices(context, true)
     val outputs = rememberDevices(context, false)
@@ -190,14 +213,21 @@ fun ModemScreen() {
         prefs.capture = capture; prefs.playback = playback
         prefs.monitor = monitor; prefs.monitorFrames = monitorFrames; prefs.monitorCalls = monitorCalls
         prefs.debugLog = debugLog; prefs.recordAudio = recordAudio; prefs.registered = registered
+        prefs.hookup = hookup.name
         val builtIn = listOfNotNull(inputs.find { it.id == capture }, outputs.find { it.id == playback }).filter { it.builtIn }
         problem = when {
+            hookup == Hookup.TRUSDX -> if (serialPorts.isEmpty()) "No USB serial adapter found. Plug in the (tr)uSDX." else null
             inputs.none { it.id == capture } || outputs.none { it.id == playback } -> "Choose an audio input and output."
             builtIn.isNotEmpty() && !allowBuiltIn ->
                 "Not transmitting into ${builtIn.first().label}. Connect your radio's USB audio interface."
             else -> null
         }
-        if (problem == null) {
+        if (problem == null && hookup == Hookup.TRUSDX) {
+            val driver = TrusdxPort.drivers(context).first()
+            TrusdxPort.requestPermission(context, driver.device) { granted ->
+                if (granted) Modem.start(context, prefs.config()) else problem = "USB access to the (tr)uSDX was not given."
+            }
+        } else if (problem == null) {
             if (debugLog) {
                 // What only the app knows: the devices by name and the volume the phone plays at.
                 val am = context.getSystemService(AudioManager::class.java)
@@ -230,7 +260,10 @@ fun ModemScreen() {
                             Modem.stop(context)
                         } else {
                             val need = listOf(Manifest.permission.RECORD_AUDIO, Manifest.permission.POST_NOTIFICATIONS)
-                            if (context.checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
+                            // A (tr)uSDX's audio comes over USB serial, so it needs no microphone access.
+                            if (hookup == Hookup.TRUSDX ||
+                                context.checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
+                            ) {
                                 start()
                             } else {
                                 micLauncher.launch(need.toTypedArray())
@@ -258,21 +291,31 @@ fun ModemScreen() {
         Note("Only with a registered copy of VARA: higher speeds, and links at full speed with other registered stations.")
 
         Section("Radio")
-        Choice("Audio in", inputs, inputs.find { it.id == capture }, { it?.label ?: "none" }, editable) { capture = it?.id ?: 0 }
-        Choice("Audio out", outputs, outputs.find { it.id == playback }, { it?.label ?: "none" }, editable) { playback = it?.id ?: 0 }
-        Choice("PTT", Ptt.entries, ptt, { if (it == Ptt.VOX) "VOX" else "rigctld (network CAT)" }, editable) { ptt = it }
-        if (ptt == Ptt.RIGCTLD) {
-            OutlinedTextField(
-                rigctld, { rigctld = it }, Modifier.fillMaxWidth(), enabled = editable, label = { Text("rigctld host:port") },
-                singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri, autoCorrectEnabled = false),
+        Choice("Connection", Hookup.entries, hookup, { it.label }, editable) { hookup = it }
+        if (hookup == Hookup.TRUSDX) {
+            Text("Serial port  ${serialPorts.firstOrNull() ?: "none plugged in"}")
+            Note(
+                "The (tr)uSDX sends and receives its audio as data on its USB serial (CAT) port, so no sound card " +
+                    "or microphone is used, and xara keys it over CAT. It needs the DL2MAN / PE1NNZ firmware with " +
+                    "CAT streaming. Its speaker stays off while xara streams.",
+            )
+        } else {
+            Choice("Audio in", inputs, inputs.find { it.id == capture }, { it?.label ?: "none" }, editable) { capture = it?.id ?: 0 }
+            Choice("Audio out", outputs, outputs.find { it.id == playback }, { it?.label ?: "none" }, editable) { playback = it?.id ?: 0 }
+            Choice("PTT", Ptt.entries, ptt, { if (it == Ptt.VOX) "VOX" else "rigctld (network CAT)" }, editable) { ptt = it }
+            if (ptt == Ptt.RIGCTLD) {
+                OutlinedTextField(
+                    rigctld, { rigctld = it }, Modifier.fillMaxWidth(), enabled = editable, label = { Text("rigctld host:port") },
+                    singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri, autoCorrectEnabled = false),
+                )
+            }
+            Toggle("Allow the phone's own speaker and mic", allowBuiltIn, editable) { allowBuiltIn = it }
+            Note(
+                "xara transmits into the audio output chosen above. Connect a USB audio interface such as a Digirig; " +
+                    "with the toggle off, xara will not start on the phone's own speaker or mic. Key the radio with VOX " +
+                    "or rigctld.",
             )
         }
-        Toggle("Allow the phone's own speaker and mic", allowBuiltIn, editable) { allowBuiltIn = it }
-        Note(
-            "xara transmits into the audio output chosen above. Connect a USB audio interface such as a Digirig; " +
-                "with the toggle off, xara will not start on the phone's own speaker or mic. Key the radio with VOX " +
-                "or rigctld.",
-        )
 
         Section("Receive")
         Toggle("Show other stations' traffic", monitor, editable && mode.isHF) { monitor = it }

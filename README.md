@@ -96,7 +96,9 @@ the phone's network. it runs as a foreground service, so it keeps going in the
 background.
 
 plug in a USB audio interface such as a Digirig and choose it as the audio in
-and out. PTT is VOX or hamlib `rigctld` over the network.
+and out. PTT is VOX or hamlib `rigctld` over the network. or plug in a
+(tr)uSDX and choose it as the connection: its audio and PTT go over its USB
+serial port, so nothing else is needed (see [(tr)uSDX](#trusdx)).
 
 to build it you need the Android SDK with NDK 28.2 and the rust Android
 targets; gradle compiles the Rust modem first:
@@ -112,7 +114,7 @@ see [android/README.md](android/README.md) for the details.
 
     --call CALL             your callsign (required)
 
-    --audio pulse|alsa|coreaudio  audio path (coreaudio on macOS)
+    --audio pulse|alsa|coreaudio|trusdx  audio path (coreaudio on macOS)
     --list-devices          list capture and playback devices, then exit
     --capture SOURCE        audio source
     --playback SINK         audio sink
@@ -159,6 +161,7 @@ we support the following PTT methods:
  - rts and dtr on a serial port
  - cm108/cm119 HID GPIO (hidraw on linux, USB id on macOS)
  - hamlib rigctld CAT
+ - (tr)uSDX CAT, in the serial stream that carries its audio
  - vox (not recommended)
 
 you can adjust the following PTT settings as well:
@@ -175,10 +178,29 @@ summary of settings:
     --ptt cm108:DEV[:GPIO]      cm108/cm119 HID GPIO (default GPIO: 3)
     --ptt cm108:VID:PID[:GPIO]  same, by hex USB id (macOS)
     --ptt rigctld[:HOST:PORT]   hamlib rigctld CAT on HOST:PORT
+    --ptt trusdx                (tr)uSDX CAT, with --audio trusdx
 
     --ptt-lead-ms N             PTT held for N ms before xmit (default: 0)
     --ptt-tail-ms N             PTT held for N ms after xmit (default: 100)
     --ptt-max-s N               release PTT after N sec max (1-120, default: 30)
+
+## (tr)uSDX
+
+the (tr)uSDX can send and receive its audio as data on its USB serial (CAT)
+port (DL2MAN / PE1NNZ firmware), so it needs no sound card: received audio
+streams at 7825 Hz after `UA2;`, and transmit audio goes at 11520 Hz between
+`TX0;` and `RX;`. `--audio trusdx` uses that, with the serial port as both
+the capture and playback device, and `--ptt trusdx` keys the radio in the
+same stream:
+
+    xara --call YOURCALL --hf 2300 --audio trusdx \
+         --capture /dev/ttyUSB0 --playback /dev/ttyUSB0 --radio --ptt trusdx
+
+the port runs at 115200 8N1 with DTR on and RTS off; on macOS it is the
+`/dev/cu.wchusbserial*` device. the radio's speaker is off while xara
+streams. the Android app does the same over Android's USB host API. ported
+from Shane Curless VA3SHC's Android work in
+[x0rro/xara#12](https://github.com/x0rro/xara/pull/12).
 
 ## xara-monitor
 

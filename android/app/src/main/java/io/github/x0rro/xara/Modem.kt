@@ -48,6 +48,7 @@ object Modem {
     fun start(context: Context, config: ModemConfig) {
         if (handle != 0L) return
         val i = Intent(context, ModemService::class.java).putExtra(ModemService.ARGS, config.arguments())
+            .putExtra(ModemService.TRUSDX, config.hookup == Hookup.TRUSDX)
         config.stateDir.mkdirs()
         ContextCompat.startForegroundService(context, i)
         status.value = "Starting…"
@@ -74,7 +75,7 @@ object Modem {
         val h = handle.takeIf { it != 0L } ?: return
         handle = 0L
         status.value = "Stopping…"
-        val code = withContext(Dispatchers.IO) { Native.stop(h) }
+        val code = withContext(Dispatchers.IO) { Native.stop(h).also { TrusdxPort.close() } }
         drainLog()
         running.value = false
         val why = _log.value.lastOrNull { it.startsWith("xara: ") }?.removePrefix("xara: ") ?: "see Log"
@@ -111,14 +112,25 @@ class ModemService : Service() {
     }
 
     override fun onDestroy() {
+        TrusdxPort.close()
         instance = null
         super.onDestroy()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        startForeground(1, notification(), ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE)
+        val trusdx = intent?.getBooleanExtra(TRUSDX, false) == true
+        // A (tr)uSDX sends its audio over USB serial; nothing is recorded from a microphone.
+        val type = if (trusdx) ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE else ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
+        startForeground(1, notification(), type)
         val args = intent?.getStringArrayExtra(ARGS)
-        if (args == null || !Modem.startNative(args)) stopSelf()
+        val serial = if (trusdx) TrusdxPort.open(this) else null
+        if (serial != null) {
+            Modem.status.value = serial
+            stopSelf()
+        } else if (args == null || !Modem.startNative(args)) {
+            TrusdxPort.close()
+            stopSelf()
+        }
         return START_NOT_STICKY
     }
 
@@ -139,6 +151,7 @@ class ModemService : Service() {
 
     companion object {
         const val ARGS = "args"
+        const val TRUSDX = "trusdx"
         private const val CHANNEL = "modem"
         var instance: ModemService? = null
     }

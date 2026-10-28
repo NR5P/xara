@@ -12,6 +12,7 @@ mod coreaudio_ffi;
 pub mod pulse;
 #[cfg(pulse)]
 mod pulse_ffi;
+pub mod trusdx;
 
 #[cfg(not(any(pulse, alsa, coreaudio, aaudio)))]
 compile_error!(
@@ -82,6 +83,8 @@ pub enum Backend {
     Alsa,
     CoreAudio,
     AAudio,
+    /// A (tr)uSDX's audio inside its CAT serial stream, on any platform.
+    Trusdx,
 }
 
 impl Default for Backend {
@@ -107,7 +110,8 @@ impl std::str::FromStr for Backend {
             "alsa" => Self::Alsa,
             "coreaudio" => Self::CoreAudio,
             "aaudio" => Self::AAudio,
-            _ => return Err(format!("--audio {s:?}: expected pulse, alsa, coreaudio or aaudio")),
+            "trusdx" => Self::Trusdx,
+            _ => return Err(format!("--audio {s:?}: expected pulse, alsa, coreaudio, aaudio or trusdx")),
         };
         if b.built() { Ok(b) } else { Err(format!("--audio {s}: {}", unbuilt_why(b))) }
     }
@@ -120,6 +124,7 @@ impl Backend {
             Self::Alsa => cfg!(alsa),
             Self::CoreAudio => cfg!(coreaudio),
             Self::AAudio => cfg!(aaudio),
+            Self::Trusdx => true,
         }
     }
 
@@ -129,6 +134,7 @@ impl Backend {
             Self::Alsa => "alsa",
             Self::CoreAudio => "coreaudio",
             Self::AAudio => "aaudio",
+            Self::Trusdx => "trusdx",
         }
     }
 }
@@ -157,6 +163,7 @@ pub fn open(b: Backend, capture: &str, playback: &str, radio: bool) -> io::Resul
         Backend::CoreAudio => Ok(Box::new(coreaudio::CoreAudioIo::open(capture, playback, radio)?)),
         #[cfg(aaudio)]
         Backend::AAudio => Ok(Box::new(aaudio::AAudioIo::open(capture, playback, radio)?)),
+        Backend::Trusdx => Ok(Box::new(trusdx::TrusdxIo::open(capture, playback, radio)?)),
         #[cfg(not(all(pulse, alsa, coreaudio, aaudio)))]
         _ => Err(unbuilt(b)),
     }
@@ -172,6 +179,7 @@ pub fn check_playback(b: Backend, playback: &str, radio: bool) -> io::Result<()>
         Backend::CoreAudio => coreaudio::check(playback, radio),
         #[cfg(aaudio)]
         Backend::AAudio => aaudio::check(playback, radio),
+        Backend::Trusdx => trusdx::check(playback, radio),
         #[cfg(not(all(pulse, alsa, coreaudio, aaudio)))]
         _ => Err(unbuilt(b)),
     }
@@ -187,6 +195,7 @@ pub fn list(b: Backend) -> io::Result<(DeviceList, DeviceList)> {
         Backend::CoreAudio => coreaudio::list(),
         #[cfg(aaudio)]
         Backend::AAudio => aaudio::list(),
+        Backend::Trusdx => trusdx::list(),
         #[cfg(not(all(pulse, alsa, coreaudio, aaudio)))]
         _ => Err(unbuilt(b)),
     }
@@ -202,6 +211,7 @@ pub fn open_capture(b: Backend, capture: &str) -> io::Result<Box<dyn Audio>> {
         Backend::CoreAudio => Ok(Box::new(coreaudio::CoreAudioIo::open_capture(capture)?)),
         #[cfg(aaudio)]
         Backend::AAudio => Ok(Box::new(aaudio::AAudioIo::open_capture(capture)?)),
+        Backend::Trusdx => Ok(Box::new(trusdx::TrusdxIo::open_capture(capture)?)),
         #[cfg(not(all(pulse, alsa, coreaudio, aaudio)))]
         _ => Err(unbuilt(b)),
     }
