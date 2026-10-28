@@ -35,7 +35,7 @@ impl Default for Options {
 pub enum Report {
     Host(HostEvent),
     Ptt(bool),
-    Bitrate { level: usize, bps: u32, tx: bool },
+    Bitrate { level: usize, bps: u32, tx: bool, modulation: String },
     Busy(bool),
     UnencryptedLink,
     Trace(String),

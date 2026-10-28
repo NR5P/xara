@@ -36,6 +36,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.List
+import androidx.compose.material.icons.filled.ChatBubbleOutline
 import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.SettingsInputAntenna
@@ -100,14 +101,20 @@ class MainActivity : ComponentActivity() {
 @Composable
 fun App() {
     var tab by rememberSaveable { mutableIntStateOf(0) }
-    val titles = listOf("xara", "Web UI", "Log")
+    val titles = listOf("xara", "Web UI", "Received", "Log")
     Scaffold(
-        topBar = { TopAppBar(title = { Text(titles[tab]) }, actions = { if (tab == 2) LogActions() }) },
+        topBar = {
+            TopAppBar(title = { Text(titles[tab]) }, actions = {
+                if (tab == 2) ReceivedActions()
+                if (tab == 3) LogActions()
+            })
+        },
         bottomBar = {
             NavigationBar {
                 NavigationBarItem(tab == 0, { tab = 0 }, { Icon(Icons.Default.SettingsInputAntenna, null) }, label = { Text("Modem") })
                 NavigationBarItem(tab == 1, { tab = 1 }, { Icon(Icons.Default.GraphicEq, null) }, label = { Text("Web UI") })
-                NavigationBarItem(tab == 2, { tab = 2 }, { Icon(Icons.AutoMirrored.Default.List, null) }, label = { Text("Log") })
+                NavigationBarItem(tab == 2, { tab = 2 }, { Icon(Icons.Default.ChatBubbleOutline, null) }, label = { Text("Received") })
+                NavigationBarItem(tab == 3, { tab = 3 }, { Icon(Icons.AutoMirrored.Default.List, null) }, label = { Text("Log") })
             }
         },
     ) { pad ->
@@ -115,6 +122,7 @@ fun App() {
             when (tab) {
                 0 -> ModemScreen()
                 1 -> WebScreen()
+                2 -> ReceivedScreen()
                 else -> LogScreen()
             }
         }
@@ -156,6 +164,12 @@ fun ModemScreen() {
     var lan by remember { mutableStateOf(prefs.lan) }
     var uiControl by remember { mutableStateOf(prefs.uiControl) }
     var allowBuiltIn by remember { mutableStateOf(prefs.allowBuiltIn) }
+    var monitor by remember { mutableStateOf(prefs.monitor) }
+    var monitorFrames by remember { mutableStateOf(prefs.monitorFrames) }
+    var monitorCalls by remember { mutableStateOf(prefs.monitorCalls) }
+    var debugLog by remember { mutableStateOf(prefs.debugLog) }
+    var recordAudio by remember { mutableStateOf(prefs.recordAudio) }
+    var registered by remember { mutableStateOf(prefs.registered) }
     var problem by remember { mutableStateOf<String?>(null) }
     val inputs = rememberDevices(context, true)
     val outputs = rememberDevices(context, false)
@@ -174,6 +188,8 @@ fun ModemScreen() {
         prefs.call = call; prefs.mode = mode.name; prefs.ptt = ptt.name; prefs.rigctld = rigctld
         prefs.driveDb = drive; prefs.lan = lan; prefs.uiControl = uiControl; prefs.allowBuiltIn = allowBuiltIn
         prefs.capture = capture; prefs.playback = playback
+        prefs.monitor = monitor; prefs.monitorFrames = monitorFrames; prefs.monitorCalls = monitorCalls
+        prefs.debugLog = debugLog; prefs.recordAudio = recordAudio; prefs.registered = registered
         val builtIn = listOfNotNull(inputs.find { it.id == capture }, outputs.find { it.id == playback }).filter { it.builtIn }
         problem = when {
             inputs.none { it.id == capture } || outputs.none { it.id == playback } -> "Choose an audio input and output."
@@ -181,7 +197,19 @@ fun ModemScreen() {
                 "Not transmitting into ${builtIn.first().label}. Connect your radio's USB audio interface."
             else -> null
         }
-        if (problem == null) Modem.start(context, prefs.config())
+        if (problem == null) {
+            if (debugLog) {
+                // What only the app knows: the devices by name and the volume the phone plays at.
+                val am = context.getSystemService(AudioManager::class.java)
+                val music = AudioManager.STREAM_MUSIC
+                prefs.debugLogFile.appendText(
+                    "android: start ${java.util.Date()}, in ${inputs.find { it.id == capture }?.label} ($capture), " +
+                        "out ${outputs.find { it.id == playback }?.label} ($playback), media volume " +
+                        "${am.getStreamVolume(music)}/${am.getStreamMaxVolume(music)}, drive $drive dB\n",
+                )
+            }
+            Modem.start(context, prefs.config())
+        }
     }
     val micLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { got ->
         if (got[Manifest.permission.RECORD_AUDIO] == true) start() else problem = "Microphone access is needed to hear the radio."
@@ -226,6 +254,8 @@ fun ModemScreen() {
             TextButton({ drive = (drive - 1).coerceAtLeast(-30) }, enabled = editable) { Text("−") }
             TextButton({ drive = (drive + 1).coerceAtMost(0) }, enabled = editable) { Text("+") }
         }
+        Toggle("Registered (VARA licence)", registered, editable) { registered = it }
+        Note("Only with a registered copy of VARA: higher speeds, and links at full speed with other registered stations.")
 
         Section("Radio")
         Choice("Audio in", inputs, inputs.find { it.id == capture }, { it?.label ?: "none" }, editable) { capture = it?.id ?: 0 }
@@ -242,6 +272,38 @@ fun ModemScreen() {
             "xara transmits into the audio output chosen above. Connect a USB audio interface such as a Digirig; " +
                 "with the toggle off, xara will not start on the phone's own speaker or mic. Key the radio with VOX " +
                 "or rigctld.",
+        )
+
+        Section("Receive")
+        Toggle("Show other stations' traffic", monitor, editable && mode.isHF) { monitor = it }
+        if (monitor && mode.isHF) {
+            Choice("Show", listOf(false, true), monitorFrames, { if (it) "Every packet" else "Text only" }, editable) {
+                monitorFrames = it
+            }
+            OutlinedTextField(
+                monitorCalls, { monitorCalls = it.uppercase() }, Modifier.fillMaxWidth(), enabled = editable,
+                label = { Text("Calls to name (optional)") }, singleLine = true,
+                keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Characters, autoCorrectEnabled = false),
+            )
+        }
+        Note(
+            if (mode.isHF) {
+                "The Received tab always shows your own links. With this on it also decodes VARA HF traffic " +
+                    "between other stations, like VARA's monitor. Answering stations show as #hash unless their " +
+                    "call is listed. Every packet lists each frame heard."
+            } else {
+                "Showing other stations' traffic is for VARA HF; FM shows your own links only."
+            },
+        )
+
+        Section("Troubleshooting")
+        Toggle("Keep a debug log", debugLog, editable) { debugLog = it }
+        Toggle("Record received audio", recordAudio, editable) { recordAudio = it }
+        Note(
+            "The debug log adds a timestamped line for every frame heard and sent, every host command and, " +
+                "once a second, the receive and transmit levels, to debug.log in the app's storage. Recording " +
+                "saves what the modem hears and sends (about 3 MB a minute) to recordings/. Both are read with " +
+                "adb shell run-as io.github.x0rro.xara.",
         )
 
         Section("Clients")
@@ -322,6 +384,32 @@ fun WebScreen() {
         )
         IconButton({ reload++ }, Modifier.align(Alignment.TopEnd)) { Icon(Icons.Default.Refresh, "Reload") }
     }
+}
+
+@Composable
+fun ReceivedScreen() {
+    val received by Modem.received.collectAsState()
+    val scroll = rememberScrollState()
+    LaunchedEffect(received.length) { scroll.animateScrollTo(scroll.maxValue) }
+    Surface(Modifier.fillMaxSize()) {
+        Text(
+            received.ifEmpty { "Nothing received yet." },
+            Modifier.verticalScroll(scroll).padding(12.dp),
+            fontFamily = FontFamily.Monospace, fontSize = 13.sp,
+            color = if (received.isEmpty()) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface,
+        )
+    }
+}
+
+@Composable
+fun ReceivedActions() {
+    val context = LocalContext.current
+    val received by Modem.received.collectAsState()
+    TextButton({
+        val send = Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, received)
+        context.startActivity(Intent.createChooser(send, "Share received text"))
+    }) { Text("Share") }
+    TextButton({ Modem.clearReceived() }) { Text("Clear") }
 }
 
 @Composable

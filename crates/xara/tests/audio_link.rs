@@ -141,3 +141,66 @@ fn ptt_lead_is_absorbed() {
         assert!(after.top_tx(0) >= 10 && after.secs() < 100.0, "lead {ms:?}: {:.1} s\n{}", after.secs(), after.trace());
     }
 }
+
+/// Two phones on their own speakers and mics: each one's audio reaches the other a few hundred ms
+/// late (measured 200 ms one way, 300 ms back). The caller's answer window cannot absorb that, and
+/// the latency each station is told only shifts its own timing, so each is told the round trip.
+#[test]
+fn audio_round_trip_delay_is_absorbed_when_told() {
+    let run = |told: [i64; 2]| {
+        let cfg = |call: &str, seed| Config { seed, ..Config::new(Bandwidth::Hz2300, call) };
+        let opts = |i: usize| Options { tx_latency: told[i] * 48, ..Options::default() };
+        let mut a = Air::pair(
+            [Station::new(cfg("N0CALL", 3), opts(0)), Station::new(cfg("N1CALL", 5), opts(1))],
+            [2400 + 200 * 48, 2400 + 300 * 48],
+            0.002,
+            |r| matches!(r, Report::Host(HostEvent::Buffer(_) | HostEvent::Sn(_))),
+        );
+        a.st[0].connect("N0CALL", "N1CALL", &[]);
+        let line = Report::Host(HostEvent::Connected {
+            caller: "N0CALL".into(),
+            answerer: "N1CALL".into(),
+            vias: Vec::new(),
+            bw: Bandwidth::Hz2300.into(),
+        });
+        if !a.run_until(40.0, |x| x.has(0, &line) && x.has(1, &line)) {
+            return Err(a.trace());
+        }
+        let (pa, pb) = (payload(400, 77), payload(200, 78));
+        a.st[0].send(&pa);
+        a.st[1].send(&pb);
+        if !a.run_until(240.0, |x| x.got[1].len() >= pa.len() && x.got[0].len() >= pb.len()) {
+            return Err(a.trace());
+        }
+        assert_eq!((&a.got[1], &a.got[0]), (&pa, &pb));
+        Ok(())
+    };
+    assert!(run([0, 0]).is_err(), "a 200/300 ms delay should break the call when untold");
+    assert!(run([200, 300]).is_err(), "each side's own one-way delay is not enough");
+    run([500, 500]).unwrap_or_else(|t| panic!("told the round trip:\n{t}"));
+}
+
+/// Call signs with an SSID, as Winlink stations and P2P partners use. The header carries the
+/// caller's call packed into letters and digits only (the `-` becomes a blank, as in VARA),
+/// so the answerer has to restore the `-` to key the link on the same call hash as the caller.
+#[test]
+fn ssid_calls_link_over_audio() {
+    for (a, b) in [("NR5P-1", "NR5P-2"), ("N0CALL", "W1AW-10")] {
+        let cfg = |call: &str, seed| Config { seed, ..Config::new(Bandwidth::Hz2300, call) };
+        let mut air = Air::pair(
+            [Station::new(cfg(a, 3), Options::default()), Station::new(cfg(b, 5), Options::default())],
+            [2400, 2400],
+            0.002,
+            |r| matches!(r, Report::Host(HostEvent::Buffer(_) | HostEvent::Sn(_))),
+        );
+        air.st[0].connect(a, b, &[]);
+        let line = Report::Host(HostEvent::Connected { caller: a.into(), answerer: b.into(), vias: Vec::new(), bw: Bandwidth::Hz2300.into() });
+        assert!(air.run_until(40.0, |x| x.has(0, &line) && x.has(1, &line)), "{a} -> {b}:\n{}", air.trace());
+        let (pa, pb) = (payload(300, 77), payload(120, 78));
+        air.st[0].send(&pa);
+        air.st[1].send(&pb);
+        assert!(air.run_until(60.0, |x| x.got[1].len() >= pa.len() && x.got[0].len() >= pb.len()), "{a} -> {b}:\n{}", air.trace());
+        assert_eq!((&air.got[1], &air.got[0]), (&pa, &pb));
+    }
+}
+

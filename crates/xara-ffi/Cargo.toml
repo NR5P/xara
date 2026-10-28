@@ -12,6 +12,10 @@ description = "C and JNI interfaces for embedding the xara modem in an app (iOS 
 [lib]
 crate-type = ["staticlib", "cdylib", "rlib"]
 
+[features]
+# Registered VARA speeds; the apps build with it and turn it on only when the user says they hold a VARA licence.
+registered = ["xara/registered"]
+
 [dependencies]
 xara = { path = "../xara", default-features = false }
 xara-host.workspace = true

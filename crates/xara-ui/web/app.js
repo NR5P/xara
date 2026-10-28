@@ -103,6 +103,7 @@ function status(s) {
   $("level").textContent = linked ? s.level : "-";
   $("bps").textContent = s.bitrate ? s.bitrate.bps : "-";
   $("dir").textContent = s.bitrate ? (s.bitrate.tx ? "bps TX" : "bps RX") : "";
+  $("modulation").textContent = linked && s.bitrate && s.bitrate.modulation ? s.bitrate.modulation : "-";
   $("sn").textContent = s.sn === null ? "-" : s.sn.toFixed(1);
   $("afc").textContent = s.afc === null ? "-" : (s.afc > 0 ? "+" : "") + s.afc.toFixed(1);
   $("tries").textContent = `${s.attempts} / ${s.retries}`;
@@ -158,6 +159,7 @@ function showSettings(m) {
   err.textContent = m.error || "";
   $("set-hf").hidden = mode !== "hf";
   $("set-fm").hidden = mode !== "fm";
+  for (const id of ["set-monitor", "set-frames", "set-calls", "set-monitor-hint"]) $(id).hidden = mode !== "hf";
   $("set-save").disabled = !m.available;
   $("set-reset").disabled = !m.available;
   if (!m.available) setMsg("Saving settings needs --state-dir, or running as a systemd service.", false);
@@ -165,7 +167,8 @@ function showSettings(m) {
   for (const el of $("set-form").elements) {
     el.value = m.saved[el.name] || "";
     if (el.tagName === "INPUT") el.placeholder = m.values[el.name] || "";
-    if (el.tagName === "SELECT") el.options[0].textContent = `command line (${m.values[el.name] || "default"})`;
+    const v = { yes: "on", no: "off" }[m.values[el.name]] || m.values[el.name] || "default";
+    if (el.tagName === "SELECT") el.options[0].textContent = `command line (${v})`;
   }
 }
 

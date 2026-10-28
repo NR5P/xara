@@ -56,8 +56,16 @@ struct Args {
     radio: bool,
     ptt: Option<PttSpec>,
     timing: PttTiming,
+    /// Delay in the audio path that xara does not add itself (a phone's own speaker and mic,
+    /// a network audio link): allowed for in its timing, with nothing inserted.
+    audio_latency: Duration,
     record: Option<PathBuf>,
+    /// A text log of everything xara logs, its frames and once a second the audio levels.
+    debug_log: Option<PathBuf>,
     hf_given: bool,
+    monitor: bool,
+    monitor_frames: bool,
+    heard: Vec<String>,
 }
 
 fn finite(k: &str, v: &str) -> Result<f64, String> {
@@ -89,8 +97,13 @@ fn defaults() -> Args {
         radio: false,
         ptt: None,
         timing: PttTiming::default(),
+        audio_latency: Duration::ZERO,
         record: None,
+        debug_log: None,
         hf_given: false,
+        monitor: false,
+        monitor_frames: false,
+        heard: Vec::new(),
     }
 }
 
@@ -145,7 +158,12 @@ fn take(a: &mut Args, k: &str, mut v: impl FnMut() -> Result<String, String>) ->
         "--ptt-lead-ms" => a.timing.lead = Duration::from_millis(num(k, &v()?)?),
         "--ptt-tail-ms" => a.timing.tail = Duration::from_millis(num(k, &v()?)?),
         "--ptt-max-s" => a.timing.max_on = Duration::from_secs(num(k, &v()?)?),
+        "--audio-latency-ms" => a.audio_latency = Duration::from_millis(num(k, &v()?)?),
         "--record" => a.record = Some(PathBuf::from(v()?)),
+        "--debug-log" => a.debug_log = Some(PathBuf::from(v()?)),
+        "--monitor" => a.monitor = true,
+        "--monitor-frames" => a.monitor_frames = true,
+        "--monitor-call" => a.heard.push(cli::call(&v()?)?),
         #[cfg(feature = "registered")]
         "--registered" => a.registered = true,
         #[cfg(not(feature = "registered"))]
@@ -175,10 +193,46 @@ fn build(argv: &[String], saved: &Pairs) -> Result<Args, String> {
         if !settings::KEYS.contains(&k.as_str()) {
             return Err(format!("unknown setting {k}"));
         }
-        take(&mut a, &format!("--{k}"), || Ok(v.clone()))?;
+        let flag = format!("--{k}");
+        match k.as_str() {
+            "debug-log" | "record" => {
+                let p = match v.as_str() {
+                    "yes" => Some(state_dir(&a).ok_or(format!("{k} needs a state directory"))?.join(saved_file(k))),
+                    _ => None,
+                };
+                if k == "record" { a.record = p } else { a.debug_log = p }
+            }
+            "monitor-call" => {
+                a.heard.clear();
+                for c in v.split_whitespace() {
+                    take(&mut a, &flag, || Ok(c.to_string()))?;
+                }
+            }
+            _ if settings::SWITCHES.contains(&k.as_str()) && v == "no" => *switch(&mut a, k) = false,
+            _ => take(&mut a, &flag, || Ok(v.clone()))?,
+        }
     }
     check(&a)?;
     Ok(a)
+}
+
+fn switch<'a>(a: &'a mut Args, k: &str) -> &'a mut bool {
+    match k {
+        "registered" => &mut a.registered,
+        "monitor" => &mut a.monitor,
+        _ => &mut a.monitor_frames,
+    }
+}
+
+/// Where the debug-log and record settings write, in the state directory: one log, and a
+/// recording for each start, named by its UTC time as the macOS app names them.
+fn saved_file(k: &str) -> String {
+    if k == "debug-log" {
+        return "debug.log".into();
+    }
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs());
+    let t: String = record::utc(now).chars().filter(char::is_ascii_digit).collect();
+    format!("xara-{}-{}.flac", &t[..8], &t[8..])
 }
 
 fn check(a: &Args) -> Result<(), String> {
@@ -203,6 +257,12 @@ fn check(a: &Args) -> Result<(), String> {
     if a.hf_given && a.fm.is_some() {
         return Err("--hf and --fm cannot both be given".into());
     }
+    if a.monitor_frames && !a.monitor {
+        return Err("--monitor-frames needs --monitor".into());
+    }
+    if a.monitor && a.fm.is_some() {
+        return Err("--monitor decodes VARA HF; it is not available with --fm".into());
+    }
     if !a.digi.is_empty() && a.fm.is_none() {
         return Err("--digi needs --fm".into());
     }
@@ -216,6 +276,9 @@ fn check(a: &Args) -> Result<(), String> {
     }
     if a.timing.lead > Duration::from_secs(1) || a.timing.tail > Duration::from_secs(1) {
         return Err("--ptt-lead-ms and --ptt-tail-ms must be <= 1000".into());
+    }
+    if a.audio_latency > Duration::from_secs(1) {
+        return Err("--audio-latency-ms must be <= 1000".into());
     }
     if a.timing.max_on.is_zero() || a.timing.max_on > Duration::from_secs(120) {
         return Err("--ptt-max-s must be 1..120".into());
@@ -359,10 +422,21 @@ fn effective(a: &Args) -> Pairs {
         ("playback", a.playback.clone()),
         ("ptt-lead-ms", a.timing.lead.as_millis().to_string()),
         ("ptt-tail-ms", a.timing.tail.as_millis().to_string()),
+        ("audio-latency-ms", a.audio_latency.as_millis().to_string()),
+        ("registered", yes(a.registered)),
+        ("monitor", yes(a.monitor)),
+        ("monitor-frames", yes(a.monitor_frames)),
+        ("monitor-call", a.heard.join(" ")),
+        ("debug-log", yes(a.debug_log.is_some())),
+        ("record", yes(a.record.is_some())),
     ]
     .into_iter()
     .map(|(k, v)| (k.to_string(), v))
     .collect()
+}
+
+fn yes(on: bool) -> String {
+    (if on { "yes" } else { "no" }).into()
 }
 
 fn devices(b: Backend) -> std::io::Result<Devices> {
@@ -421,7 +495,9 @@ fn run(
     stop: &Arc<AtomicBool>,
     rec: Option<&mut Recorder>,
 ) -> std::io::Result<Outcome> {
-    let opts = Options { drive_db: a.drive_db, tx_latency: lead_samples(a) as i64 };
+    // The PTT lead is silence xara inserts and then allows for; the audio latency is only allowed for.
+    let latency = a.audio_latency.as_millis() as usize * (audio::RATE / 1000) as usize;
+    let opts = Options { drive_db: a.drive_db, tx_latency: (lead_samples(a) + latency) as i64 };
     let host = Host::bind(&a.addr, a.port)?;
     let mode = match a.fm {
         Some(bw) => format!("FM {bw:?}"),
@@ -473,7 +549,8 @@ fn serve<M: Modem>(
         say!("KISS {}", k.addr);
         tnc.set_kiss(k);
     }
-    tnc.set_echo(!a.quiet);
+    tnc.set_echo(!a.quiet || a.debug_log.is_some());
+    tnc.set_level_log(a.debug_log.is_some());
     let _ui = match a.ui.port {
         Some(p) => {
             let (t, feed) = telemetry::channel(EVENT_QUEUE);
@@ -496,7 +573,22 @@ fn serve<M: Modem>(
         }
         None => None,
     };
+    // Without an app to show it, received text goes to stdout.
+    if a.monitor && !crate::rxtext::has_sink() {
+        crate::rxtext::set_sink(|s| print!("{s}"));
+    }
+    let passive = match a.monitor {
+        true => Some(crate::rxtext::Passive::spawn(
+            a.bw,
+            &[&[a.call.clone()][..], &a.heard][..].concat(),
+            a.monitor_frames,
+        )?),
+        false => None,
+    };
     let pumped = pump(a, io.as_mut(), stop, rec, |x, out, forced| {
+        if let Some(p) = &passive {
+            p.feed(x);
+        }
         tnc.process(x, out);
         tnc.force_ptt_off(forced);
         Tick { keyed: tnc.keyed(), tuning: tnc.station().tuning(), restart: tnc.restart_requested() }
@@ -745,6 +837,11 @@ fn session(cmdline: &[String], stop: &Arc<AtomicBool>, inherited: Option<String>
         validate: Box::new(move |kv| with_saved(&check, kv, fm).and_then(|a| check_saved_playback(&a, kv))),
         list: Box::new(move || devices(backend)),
     }));
+    if let Err(e) = xara_host::log::set_file(a.debug_log.as_deref()) {
+        say!("--debug-log {}: {e}", a.debug_log.as_deref().unwrap_or(Path::new("")).display());
+    } else if let Some(p) = &a.debug_log {
+        say!("debug log {} (call {}, capture {}, playback {})", p.display(), a.call, a.capture, a.playback);
+    }
     let mut rec = match &a.record {
         Some(p) => {
             let p = record::part(p, part);
@@ -865,6 +962,43 @@ mod tests {
         assert_eq!((a.call.as_str(), a.radio, a.quiet, a.ui.port), ("N2CALL", true, false, Some(8080)));
         assert_eq!(a.ui.hosts, ["a.lan", "b.lan"]);
         std::fs::remove_dir_all(p.parent().unwrap()).unwrap();
+    }
+
+    #[test]
+    fn audio_latency_is_bounded_and_can_be_saved() {
+        let a = parse(&argv("--call N2CALL --capture c --playback p --audio-latency-ms 300")).unwrap().unwrap();
+        assert_eq!(a.audio_latency, Duration::from_millis(300));
+        assert!(parse(&argv("--call N2CALL --capture c --playback p --audio-latency-ms 1001")).is_err());
+        let saved = vec![("audio-latency-ms".to_string(), "250".to_string())];
+        let b = with_saved(&argv("--call N2CALL --capture c --playback p"), &saved, false).unwrap();
+        assert_eq!(b.audio_latency, Duration::from_millis(250));
+    }
+
+    #[test]
+    fn saved_switches_turn_options_on_and_off() {
+        let base = argv("--call N2CALL --capture c --playback p --monitor --monitor-call W1AW --registered");
+        let a =
+            with_saved(&base, &kv(&[("monitor-frames", "yes"), ("monitor-call", "N1CALL K1ABC-7")]), false).unwrap();
+        assert!(a.registered && a.monitor && a.monitor_frames);
+        assert_eq!(a.heard, ["N1CALL", "K1ABC-7"]);
+        let b = with_saved(&base, &kv(&[("registered", "no"), ("monitor", "no")]), false).unwrap();
+        assert!(!b.registered && !b.monitor);
+        assert!(with_saved(&base, &kv(&[("monitor", "no"), ("monitor-frames", "yes")]), false).is_err());
+        assert!(with_saved(&base, &kv(&[("debug-log", "yes")]), false).is_err_and(|e| e.contains("state directory")));
+        let dir = argv("--call N2CALL --capture c --playback p --state-dir /var/lib/xara/x --record /tmp/a.flac");
+        let c = with_saved(&dir, &kv(&[("debug-log", "yes"), ("record", "no")]), false).unwrap();
+        assert_eq!(c.debug_log.as_deref(), Some(Path::new("/var/lib/xara/x/debug.log")));
+        assert_eq!(c.record, None);
+        let r = with_saved(&dir, &kv(&[("record", "yes")]), false).unwrap().record.unwrap();
+        assert!(r.starts_with("/var/lib/xara/x") && r.extension().is_some_and(|e| e == "flac"));
+        assert_eq!(effective(&c).iter().find(|(k, _)| k == "debug-log").unwrap().1, "yes");
+    }
+
+    #[test]
+    fn debug_log_takes_a_path() {
+        let a = parse(&argv("--call N2CALL --capture c --playback p --debug-log /tmp/x.log")).unwrap().unwrap();
+        assert_eq!(a.debug_log.as_deref(), Some(Path::new("/tmp/x.log")));
+        assert!(parse(&argv("--call N2CALL --capture c --playback p --debug-log")).is_err());
     }
 
     #[test]

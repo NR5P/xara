@@ -310,8 +310,8 @@ impl Station {
     }
 
     fn bitrate(&self, level: Record, tx: bool) -> Report {
-        let bps = self.c.session.bandwidth().level(level).net_bps().round() as u32;
-        Report::Bitrate { level: level.get(), bps, tx }
+        let l = self.c.session.bandwidth().level(level);
+        Report::Bitrate { level: level.get(), bps: l.net_bps().round() as u32, tx, modulation: l.modulation() }
     }
 
     fn report_bitrate(&mut self, level: Record, tx: bool) {
@@ -561,7 +561,8 @@ impl Arq for Session {
 
 fn unproto_bitrate(level: Record, tx: bool) -> Report {
     let level = if level == cq::RECORD { Record::ONE } else { level };
-    Report::Bitrate { level: level.get(), bps: kiss::BW.level(level).net_bps().round() as u32, tx }
+    let l = kiss::BW.level(level);
+    Report::Bitrate { level: level.get(), bps: l.net_bps().round() as u32, tx, modulation: l.modulation() }
 }
 
 fn rx_end(ev: &Event) -> Option<Time> {

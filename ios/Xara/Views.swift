@@ -10,6 +10,12 @@ struct ModemView: View {
     @AppStorage("driveDb") private var driveDb = -5.0
     @AppStorage("lan") private var lan = false
     @AppStorage("uiControl") private var uiControl = false
+    @AppStorage("monitor") private var monitor = false
+    @AppStorage("monitorCalls") private var monitorCalls = ""
+    @AppStorage("recordAudio") private var recordAudio = false
+    @AppStorage("debugLog") private var debugLog = false
+    @AppStorage("registered") private var registered = false
+    @AppStorage("monitorFrames") private var monitorFrames = false
     @AppStorage("allowBuiltIn") private var allowBuiltIn = false
     @State private var addresses: [String] = []
 
@@ -45,6 +51,8 @@ struct ModemView: View {
                     Stepper(value: $driveDb, in: -30...0, step: 1) {
                         LabeledContent("TX drive", value: "\(Int(driveDb)) dB")
                     }
+                    Toggle("Registered (VARA licence)", isOn: $registered)
+                    Text("Only with a registered copy of VARA: higher speeds, and links at full speed with other registered stations.").font(.caption).foregroundStyle(.secondary)
                 }
                 .disabled(modem.running)
                 Section {
@@ -68,6 +76,26 @@ struct ModemView: View {
                 }
                 .disabled(modem.running)
                 Section {
+                    Toggle("Show other stations' traffic", isOn: $monitor)
+                        .disabled(!mode.isHF)
+                    if monitor && mode.isHF {
+                        Picker("Show", selection: $monitorFrames) {
+                            Text("Text only").tag(false)
+                            Text("Every packet").tag(true)
+                        }
+                        TextField("Calls to name (optional)", text: $monitorCalls)
+                            .textInputAutocapitalization(.characters)
+                            .autocorrectionDisabled()
+                    }
+                    Toggle("Record received audio", isOn: $recordAudio)
+                    Toggle("Keep a debug log", isOn: $debugLog)
+                } header: {
+                    Text("Receive")
+                } footer: {
+                    Text(receiveFooter)
+                }
+                .disabled(modem.running)
+                Section {
                     Toggle("Accept clients on the local network", isOn: $lan)
                     Toggle("Web UI can control the radio", isOn: $uiControl)
                 } header: {
@@ -85,6 +113,19 @@ struct ModemView: View {
         }
     }
 
+    private var receiveFooter: String {
+        let monitorNote = mode.isHF
+            ? "The Received tab always shows your own links. With this on it also decodes VARA HF traffic "
+                + "between other stations, like VARA's monitor. Answering stations show as #hash unless their "
+                + "call is listed above. Every packet lists each frame heard, as VARA's monitor does."
+            : "Showing other stations' traffic is for VARA HF; FM shows your own links only."
+        let recordNote = " Recording saves the radio's audio while the modem runs (about 3 MB a minute) to "
+            + "Files › On My iPhone › xara, for troubleshooting decoding."
+        let debugNote = " The debug log adds a timestamped line for every frame heard and sent, every host command and, "
+            + "once a second, the receive and transmit levels, to debug.log in the same place."
+        return monitorNote + (recordAudio ? recordNote : "") + (debugLog ? debugNote : "")
+    }
+
     private var clientsFooter: String {
         let p = ModemConfig.commandPort, k = ModemConfig.kissPort
         guard lan else {
@@ -99,7 +140,11 @@ struct ModemView: View {
     var config: ModemConfig {
         ModemConfig(
             call: call, mode: mode, ptt: ptt, rigctld: rigctld, driveDb: driveDb, lan: lan,
-            uiControl: uiControl, uiToken: UiToken.value, stateDir: UiToken.stateDir)
+            uiControl: uiControl, uiToken: UiToken.value, stateDir: UiToken.stateDir,
+            monitor: monitor, monitorCalls: calls(monitorCalls), monitorFrames: monitorFrames,
+            record: recordAudio ? Recordings.next() : nil,
+            debugLog: debugLog ? Recordings.debugLog : nil,
+            registered: registered)
     }
 }
 
@@ -174,6 +219,53 @@ struct WebView: UIViewRepresentable {
         if context.coordinator.loaded.map({ $0 != url || $1 != reload }) ?? true {
             context.coordinator.loaded = (url, reload)
             w.load(URLRequest(url: url))
+        }
+    }
+}
+
+enum Recordings {
+    /// A new file in the app's Documents folder, which the Files app shows under xara.
+    static func next() -> URL {
+        let f = DateFormatter()
+        f.dateFormat = "yyyyMMdd-HHmmss"
+        let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        return docs.appendingPathComponent("xara-\(f.string(from: Date())).flac")
+    }
+
+    /// The debug log, kept beside the recordings and appended to on every start.
+    static var debugLog: URL {
+        FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0].appendingPathComponent("debug.log")
+    }
+}
+
+/// Calls from a free-form list: spaces or commas between them.
+func calls(_ s: String) -> [String] {
+    s.uppercased().split(whereSeparator: { $0 == " " || $0 == "," }).map(String.init)
+}
+
+struct ReceivedView: View {
+    @EnvironmentObject private var modem: Modem
+
+    var body: some View {
+        NavigationStack {
+            ScrollViewReader { proxy in
+                ScrollView {
+                    Text(modem.received.isEmpty ? "Nothing received yet." : modem.received)
+                        .font(.system(.callout, design: .monospaced))
+                        .foregroundStyle(modem.received.isEmpty ? .secondary : .primary)
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding()
+                    Color.clear.frame(height: 1).id("end")
+                }
+                .onChange(of: modem.received) { _, _ in proxy.scrollTo("end", anchor: .bottom) }
+            }
+            .navigationTitle("Received")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ShareLink(item: modem.received)
+                Button("Clear") { modem.clearReceived() }
+            }
         }
     }
 }

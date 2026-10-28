@@ -42,7 +42,8 @@ pub struct Station {
 
 fn bitrate(bw: FmBandwidth, record: Record, tx: bool) -> Report {
     let shown = record.data_level().map_or(1, DataLevel::get);
-    Report::Bitrate { level: shown, bps: bw.level(record).net_bps().round_ties_even() as u32, tx }
+    let l = bw.level(record);
+    Report::Bitrate { level: shown, bps: l.net_bps().round_ties_even() as u32, tx, modulation: l.modulation() }
 }
 
 impl Station {

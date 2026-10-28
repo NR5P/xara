@@ -153,7 +153,7 @@ fn kiss_lines(a: &Air, i: usize) -> Vec<String> {
             Report::Host(HostEvent::Pending) => Some("PENDING".into()),
             Report::Host(HostEvent::CancelPending) => Some("CANCELPENDING".into()),
             Report::Ptt(on) => Some(format!("PTT {on}")),
-            Report::Bitrate { level, bps, tx } => Some(format!("BITRATE {level} {bps} {tx}")),
+            Report::Bitrate { level, bps, tx, .. } => Some(format!("BITRATE {level} {bps} {tx}")),
             _ => None,
         })
         .collect()

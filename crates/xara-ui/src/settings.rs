@@ -4,7 +4,26 @@ use std::sync::Mutex;
 
 pub const FILE: &str = "settings";
 const DRIVE: &str = "drive-db";
-pub const KEYS: [&str; 8] = ["call", "hf", "fm", DRIVE, "capture", "playback", "ptt-lead-ms", "ptt-tail-ms"];
+pub const KEYS: [&str; 15] = [
+    "call",
+    "hf",
+    "fm",
+    DRIVE,
+    "capture",
+    "playback",
+    "ptt-lead-ms",
+    "ptt-tail-ms",
+    "audio-latency-ms",
+    "registered",
+    "monitor",
+    "monitor-frames",
+    "monitor-call",
+    "debug-log",
+    "record",
+];
+/// Settings that are yes or no. debug-log and record, given a path on the command line, here
+/// mean a file in the state directory, so a saved setting can't write anywhere else.
+pub const SWITCHES: [&str; 5] = ["registered", "monitor", "monitor-frames", "debug-log", "record"];
 const MAX_VALUE: usize = 256;
 
 pub type Pairs = Vec<(String, String)>;
@@ -144,6 +163,12 @@ fn add(out: &mut Pairs, k: String, v: String) -> Result<(), String> {
     if (k == "capture" || k == "playback") && !device_ok(&v) {
         return Err(format!("{k} {v:?}: not a device name (letters, digits and _.,:=@+- only; no file or tee plugin)"));
     }
+    if SWITCHES.contains(&k.as_str()) && !matches!(v.as_str(), "" | "yes" | "no") {
+        return Err(format!("{k} is yes or no"));
+    }
+    if k == "monitor-call" && !v.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b' ') {
+        return Err(format!("{k} {v:?}: calls separated by spaces"));
+    }
     out.push((k, v));
     Ok(())
 }
@@ -201,7 +226,13 @@ mod tests {
             parse_save("call N0CALL\n capture  hw:1,0 \nplayback\n").unwrap(),
             parse(&render(&kv(&[("call", "N0CALL"), ("capture", "hw:1,0"), ("playback", "")]))).unwrap()
         );
-        for bad in ["radio yes", "call A\ncall B", "capture file:x"] {
+        assert_eq!(
+            parse_save("registered yes\nmonitor no\nmonitor-call N1CALL W1AW-2\nrecord\n").unwrap(),
+            kv(&[("registered", "yes"), ("monitor", "no"), ("monitor-call", "N1CALL W1AW-2"), ("record", "")])
+        );
+        for bad in
+            ["radio yes", "call A\ncall B", "capture file:x", "registered on", "debug-log /etc/x", "monitor-call A;B"]
+        {
             assert!(parse_save(bad).is_err(), "{bad:?}");
         }
         for dev in [

@@ -77,8 +77,13 @@ pub fn meter(m: &Meter) -> Obj {
 
 pub(crate) fn status(s: &Snapshot) -> String {
     let l = &s.link;
-    let bitrate =
-        s.bitrate.map(|b| Obj::new().int("level", b.level as u64).int("bps", u64::from(b.bps)).bool("tx", b.tx));
+    let bitrate = s.bitrate.as_ref().map(|b| {
+        Obj::new()
+            .int("level", b.level as u64)
+            .int("bps", u64::from(b.bps))
+            .bool("tx", b.tx)
+            .str("modulation", &b.modulation)
+    });
     Obj::typed("status")
         .num2("ts", secs(s.now))
         .obj("rx", meter(&s.rx))
@@ -188,14 +193,14 @@ mod tests {
                 ..Link::default()
             },
             sn: Some(11.25),
-            bitrate: Some(Bitrate { level: 7, bps: 2412, tx: false }),
+            bitrate: Some(Bitrate { level: 7, bps: 2412, tx: false, modulation: "OFDM 49 carriers · QPSK".into() }),
             calls: vec!["N0CALL".into()],
             ..Snapshot::default()
         };
         s.rx.feed(&[0.5; 4]);
         assert_eq!(
             status(&s),
-            r#"{"t":"status","ts":1.5,"rx":{"rms":-6.02,"peak":-6.02,"clip":0},"tx":{"rms":-120,"peak":-120,"clip":0},"ptt":true,"busy":false,"tuning":false,"tune_left":0,"drive":0,"state":"Receiving","level":7,"peer":"N1CALL","bw":"2300","passband":[350,2650],"attempts":0,"retries":0,"afc":null,"sn":11.25,"bitrate":{"level":7,"bps":2412,"tx":false},"buffer":0,"calls":["N0CALL"],"dropped":0}"#
+            r#"{"t":"status","ts":1.5,"rx":{"rms":-6.02,"peak":-6.02,"clip":0},"tx":{"rms":-120,"peak":-120,"clip":0},"ptt":true,"busy":false,"tuning":false,"tune_left":0,"drive":0,"state":"Receiving","level":7,"peer":"N1CALL","bw":"2300","passband":[350,2650],"attempts":0,"retries":0,"afc":null,"sn":11.25,"bitrate":{"level":7,"bps":2412,"tx":false,"modulation":"OFDM 49 carriers · QPSK"},"buffer":0,"calls":["N0CALL"],"dropped":0}"#
         );
     }
 

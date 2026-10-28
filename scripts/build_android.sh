@@ -24,7 +24,7 @@ for abi in "$@"; do
 	esac
 	var=$(echo "$target" | tr a-z- A-Z_)
 	export "CARGO_TARGET_${var}_LINKER=$bin/$clang$api-clang"
-	cargo build --manifest-path "$root/Cargo.toml" --locked --release -p xara-ffi --target "$target"
+	cargo build --manifest-path "$root/Cargo.toml" --locked --release -p xara-ffi --features registered --target "$target"
 	out="$root/android/app/src/main/jniLibs/$abi"
 	mkdir -p "$out"
 	cp "$root/target/$target/release/libxara_ffi.so" "$out/"

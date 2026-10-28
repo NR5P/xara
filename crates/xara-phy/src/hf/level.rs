@@ -186,7 +186,29 @@ pub struct Level {
 
 pub const FSK_PILOTS: u32 = 24;
 
+/// The name of a PSK or QAM constellation carrying `bps` bits per symbol.
+pub fn constellation(bps: u32) -> String {
+    match bps {
+        1 => "BPSK".into(),
+        2 => "QPSK".into(),
+        3 => "8PSK".into(),
+        n => format!("{}QAM", 1u32 << n),
+    }
+}
+
 impl Level {
+    /// What a person would call this level's waveform, e.g. "OFDM 49 carriers · 16QAM".
+    pub fn modulation(&self) -> String {
+        match self.waveform {
+            Waveform::Fsk { .. } => "FSK".into(),
+            Waveform::Psk { carriers_hz, .. } => {
+                let n = carriers_hz.len();
+                format!("{n} carrier{} · {}", if n == 1 { "" } else { "s" }, constellation(self.bps))
+            }
+            Waveform::Ofdm { nc, .. } => format!("OFDM {nc} carriers · {}", constellation(self.bps)),
+        }
+    }
+
     pub const fn is_fsk(&self) -> bool {
         matches!(self.waveform, Waveform::Fsk { .. })
     }
@@ -582,3 +604,21 @@ static BW2750: [Level; RECORDS] = [
     snr_corr(ofdm(Ofdm { spf: 155, bps: 4, rate: 7, thr: 15.0, papr: 9.3, k: 26145, ..O2750 }), -1.59),
     snr_corr(ofdm(Ofdm { spf: 155, bps: 5, rate: 6, thr: 18.0, papr: 9.3, k: 31376, ..O2750 }), -0.4),
 ];
+
+#[cfg(test)]
+mod modulation_tests {
+    use super::*;
+
+    #[test]
+    fn every_level_has_a_modulation_name() {
+        for bw in Bandwidth::ALL {
+            let names: Vec<String> = bw.levels().map(|r| bw.level(r).modulation()).collect();
+            assert!(names.iter().all(|n| !n.is_empty()));
+            assert_eq!(names[0], "FSK", "{bw:?}");
+            assert!(names.last().unwrap().starts_with("OFDM "), "{bw:?}: {names:?}");
+        }
+        assert_eq!(constellation(1), "BPSK");
+        assert_eq!(constellation(4), "16QAM");
+        assert_eq!(constellation(5), "32QAM");
+    }
+}

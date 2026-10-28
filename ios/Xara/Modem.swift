@@ -16,6 +16,7 @@ struct ModemConfig {
             case .fmWide: "FM wide"
             }
         }
+        var isHF: Bool { self == .hf500 || self == .hf2300 || self == .hf2750 }
         var options: [String] {
             switch self {
             case .hf500: ["--hf", "500"]
@@ -45,6 +46,16 @@ struct ModemConfig {
     var uiControl: Bool
     var uiToken: String
     var stateDir: URL
+    var monitor = false
+    var monitorCalls: [String] = []
+    /// Show every frame heard, not just links, text and CQs.
+    var monitorFrames = false
+    /// A FLAC recording of the radio's audio (and what xara sends), for troubleshooting.
+    var record: URL?
+    /// A timestamped text log of the modem: frames, host commands, audio levels once a second.
+    var debugLog: URL?
+    /// Registered VARA speeds, for a user with a VARA licence.
+    var registered = false
 
     var arguments: [String] {
         var a = ["--call", call.uppercased()] + mode.options
@@ -55,6 +66,14 @@ struct ModemConfig {
         a += ["--port", "\(Self.commandPort)", "--kiss-port", "\(Self.kissPort)"]
         a += ["--ui-port", "\(Self.uiPort)", "--ui-addr", lan ? "0.0.0.0" : "127.0.0.1"]
         if uiControl { a += ["--ui-control", "--ui-token", uiToken] }
+        if monitor && mode.isHF {
+            a += ["--monitor"]
+            if monitorFrames { a += ["--monitor-frames"] }
+            for c in monitorCalls { a += ["--monitor-call", c] }
+        }
+        if let r = record { a += ["--record", r.path] }
+        if let d = debugLog { a += ["--debug-log", d.path] }
+        if registered { a += ["--registered"] }
         a += ["--state-dir", stateDir.path]
         return a
     }
@@ -67,6 +86,8 @@ final class Modem: ObservableObject {
     @Published private(set) var starting = false
     @Published private(set) var status = "Stopped"
     @Published private(set) var log: [String] = []
+    /// What the modem received, as readable text, appended as it arrives.
+    @Published private(set) var received = ""
     @Published private(set) var route = AudioRoute.describe()
 
     private var handle: OpaquePointer?
@@ -107,6 +128,8 @@ final class Modem: ObservableObject {
             return
         }
         route = AudioRoute.describe()
+        debugLog = config.debugLog
+        note("start, route \(route), output volume \(String(format: "%.2f", AVAudioSession.sharedInstance().outputVolume))")
         if !allowBuiltIn, let why = AudioRoute.builtInReason() {
             status = "Not transmitting into \(why). Connect your radio's USB audio interface."
             return
@@ -154,6 +177,12 @@ final class Modem: ObservableObject {
             got = true
         }
         if got && log.count > 2000 { log.removeFirst(log.count - 2000) }
+        var piece = ""
+        while xara_next_received(&buf, buf.count) { piece += String(cString: buf) }
+        if !piece.isEmpty {
+            received += piece
+            if received.count > Self.receivedLimit { received.removeFirst(received.count - Self.receivedLimit) }
+        }
         if let h = handle, !xara_running(h) {
             Task { await finish() }
         }
@@ -161,6 +190,7 @@ final class Modem: ObservableObject {
 
     private func routeChanged() {
         route = AudioRoute.describe()
+        if running { note("route changed: \(route)") }
         if running, let why = AudioRoute.builtInReason(), !(lastAllowBuiltIn) {
             status = "Audio moved to \(why); stopped so nothing transmits there."
             Task { await finish() }
@@ -168,6 +198,20 @@ final class Modem: ObservableObject {
     }
 
     private var lastAllowBuiltIn: Bool { UserDefaults.standard.bool(forKey: "allowBuiltIn") }
+
+    /// The debug log in use, if any: what only the app knows (the audio route, the volume) goes in too.
+    private var debugLog: URL?
+
+    private func note(_ s: String) {
+        guard let url = debugLog, let line = "ios: \(Date().formatted(.iso8601)) \(s)\n".data(using: .utf8) else { return }
+        if let h = try? FileHandle(forWritingTo: url) {
+            h.seekToEndOfFile()
+            h.write(line)
+            try? h.close()
+        } else {
+            try? line.write(to: url)
+        }
+    }
 
     private func interrupted(_ type: AVAudioSession.InterruptionType?, resume: Bool) {
         switch type {
@@ -185,4 +229,7 @@ final class Modem: ObservableObject {
     }
 
     func clearLog() { log.removeAll() }
+    func clearReceived() { received = "" }
+
+    static let receivedLimit = 200_000
 }

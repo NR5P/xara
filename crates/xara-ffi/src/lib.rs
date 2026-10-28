@@ -10,9 +10,13 @@ use std::sync::{Arc, Mutex, Once, PoisonError};
 use std::thread::{self, JoinHandle};
 
 const LOG_LINES: usize = 1000;
+const RX_PIECES: usize = 2000;
+/// Received text is queued in pieces of at most this many bytes, so an app's buffer fits one.
+pub const RX_PIECE: usize = 1024;
 
 static RUNNING: AtomicBool = AtomicBool::new(false);
 static LOG: Mutex<VecDeque<String>> = Mutex::new(VecDeque::new());
+static RX: Mutex<VecDeque<String>> = Mutex::new(VecDeque::new());
 static CAPTURE: Once = Once::new();
 
 pub struct XaraModem {
@@ -20,12 +24,27 @@ pub struct XaraModem {
     thread: Option<JoinHandle<u8>>,
 }
 
-fn keep(line: String) {
-    let mut log = LOG.lock().unwrap_or_else(PoisonError::into_inner);
-    if log.len() == LOG_LINES {
-        log.pop_front();
+fn push(q: &Mutex<VecDeque<String>>, limit: usize, item: String) {
+    let mut q = q.lock().unwrap_or_else(PoisonError::into_inner);
+    if q.len() == limit {
+        q.pop_front();
     }
-    log.push_back(line);
+    q.push_back(item);
+}
+
+fn keep(line: String) {
+    push(&LOG, LOG_LINES, line);
+}
+
+fn received(mut s: &str) {
+    while !s.is_empty() {
+        let mut n = s.len().min(RX_PIECE);
+        while !s.is_char_boundary(n) {
+            n -= 1;
+        }
+        push(&RX, RX_PIECES, s[..n].to_string());
+        s = &s[n..];
+    }
 }
 
 /// Takes xara's log lines for the app, still copying them to stderr for a debugger's console.
@@ -34,7 +53,8 @@ fn capture_log() {
         xara_host::log::set_sink(|s| {
             eprintln!("{s}");
             s.lines().for_each(|l| keep(l.to_string()));
-        })
+        });
+        xara::rxtext::set_sink(received);
     });
 }
 
@@ -110,14 +130,34 @@ pub fn next_log() -> Option<String> {
     LOG.lock().unwrap_or_else(PoisonError::into_inner).pop_front()
 }
 
+/// The next piece of received data, rendered as text (see `xara::rxtext`).
+pub fn next_received() -> Option<String> {
+    RX.lock().unwrap_or_else(PoisonError::into_inner).pop_front()
+}
+
 /// # Safety
 /// `buf` must have room for `cap` bytes.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn xara_next_log(buf: *mut c_char, cap: usize) -> bool {
+    // SAFETY: guaranteed by the caller.
+    unsafe { copy_out(next_log(), buf, cap) }
+}
+
+/// # Safety
+/// `buf` must have room for `cap` bytes.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn xara_next_received(buf: *mut c_char, cap: usize) -> bool {
+    // SAFETY: guaranteed by the caller.
+    unsafe { copy_out(next_received(), buf, cap) }
+}
+
+/// # Safety
+/// `buf` must have room for `cap` bytes.
+unsafe fn copy_out(item: Option<String>, buf: *mut c_char, cap: usize) -> bool {
     if cap == 0 {
         return false;
     }
-    let Some(line) = next_log() else { return false };
+    let Some(line) = item else { return false };
     let mut n = line.len().min(cap - 1);
     while !line.is_char_boundary(n) {
         n -= 1;

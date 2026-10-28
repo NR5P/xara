@@ -30,6 +30,7 @@ jobs:
       - run: cargo +stable clippy --locked --workspace --all-targets -- -D warnings
       - run: cargo +stable test --locked --release --workspace
       - run: cargo +stable clippy --locked -p xara-ffi --target aarch64-apple-ios -- -D warnings
+      - run: xcodebuild -project macos/XaraMac.xcodeproj -scheme XaraMac CODE_SIGNING_ALLOWED=NO build
       - run: >-
           xcodebuild -project ios/Xara.xcodeproj -scheme Xara -destination 'generic/platform=iOS Simulator'
           -derivedDataPath ios/build/dd CODE_SIGNING_ALLOWED=NO build

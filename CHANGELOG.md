@@ -8,6 +8,20 @@
 - the host, KISS and web UI servers free their ports when dropped
 - Android app (`android/`): AAudio backend and JNI interface in `xara-ffi`
 - log lines go through one hook, so an embedding app gets xara's alone
+- macOS app (`macos/`): window, menu bar icon, settings, and `xara://start`
+  and `xara://stop` for other apps
+- received-text readout in the iOS and macOS apps, and `--monitor` to also
+  decode other stations' VARA HF traffic (`--monitor-call` names them) at
+  500 and 2300 Hz at once; `--monitor-frames` lists every frame heard, as the
+  apps' *Every packet* setting; the Android app gets the Received tab too
+- the web UI (in every app) names the link's modulation, e.g. "OFDM 49
+  carriers · 16QAM", and monitor mode's DATA lines do too
+- registered speeds are built in by default (still off until `--registered`),
+  and the apps and the web UI's settings have a *Registered (VARA licence)*
+  switch
+- the web UI's settings also set the audio delay, monitor mode (other
+  stations' traffic, every packet, calls to name), recording and a debug log,
+  the last two into the state directory
 
 ## 0.1.1
 

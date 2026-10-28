@@ -143,7 +143,10 @@ along with KISS for applications such as Pat. See the README for full details.
 :   Release PTT after *N* seconds max, 1-120 (default 30).
 
 **--registered**
-:   Enable registered speeds (must set build flag)
+
+:   Registered speeds, for a user with a registered copy of VARA: links with
+    other registered stations run at full speed. Also a switch in the web UI's
+    settings.
 
 **-h**, **--help**, **-V**, **--version**
 

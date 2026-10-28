@@ -86,6 +86,13 @@ pub extern "C" fn Java_io_github_x0rro_xara_Native_stop(_: Env, _: JObject, hand
     i32::from(unsafe { Box::from_raw(handle as *mut XaraModem) }.stop())
 }
 
+/// The next piece of received data as text, or null.
+#[unsafe(no_mangle)]
+pub extern "C" fn Java_io_github_x0rro_xara_Native_nextReceived(env: Env, _: JObject) -> JObject {
+    // SAFETY: the JVM passes a live env.
+    crate::next_received().map_or(null_mut(), |s| unsafe { new_string(env, &s) })
+}
+
 /// The next logged line, or null.
 #[unsafe(no_mangle)]
 pub extern "C" fn Java_io_github_x0rro_xara_Native_nextLog(env: Env, _: JObject) -> JObject {

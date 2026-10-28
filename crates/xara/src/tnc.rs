@@ -1,3 +1,4 @@
+use crate::rxtext::RxText;
 use crate::station::{HostConfig, Modem, Report, TX_RING_BYTES, secs};
 use xara_arq::compression::Compression;
 use xara_arq::host::{HostEvent, LinkBw};
@@ -47,6 +48,46 @@ pub struct Tnc<M: Modem> {
     tune: Option<(Tuner, Time)>,
     restart: bool,
     restart_at: Option<Time>,
+    rx: RxText,
+    /// The waveform of the last BITRATE, which the host protocol has no room for.
+    modulation: String,
+    /// Audio levels for the debug log, when one is kept.
+    levels: Option<Levels>,
+}
+
+/// One second of audio, summed up for the debug log: is anything reaching the modem?
+#[derive(Default)]
+struct Levels {
+    since: Time,
+    n: usize,
+    rx_peak: f64,
+    rx_sq: f64,
+    tx_peak: f64,
+    keyed: bool,
+}
+
+impl Levels {
+    fn feed(&mut self, input: &[f64], output: &[f64], keyed: bool) {
+        for &x in input {
+            self.rx_peak = self.rx_peak.max(x.abs());
+            self.rx_sq += x * x;
+        }
+        self.n += input.len();
+        self.tx_peak = output.iter().fold(self.tx_peak, |m, &x| m.max(x.abs()));
+        self.keyed |= keyed;
+    }
+
+    fn line(&self) -> String {
+        let db = |v: f64| if v > 0.0 { format!("{:.1}", 20.0 * v.log10()) } else { "-inf".into() };
+        let rms = if self.n > 0 { (self.rx_sq / self.n as f64).sqrt() } else { 0.0 };
+        format!(
+            "level rx peak {} rms {} dBFS, tx peak {} dBFS, ptt {}",
+            db(self.rx_peak),
+            db(rms),
+            db(self.tx_peak),
+            if self.keyed { "on" } else { "off" }
+        )
+    }
 }
 
 impl<M: Modem> Tnc<M> {
@@ -67,6 +108,9 @@ impl<M: Modem> Tnc<M> {
             tune: None,
             restart: false,
             restart_at: None,
+            rx: RxText::default(),
+            modulation: String::new(),
+            levels: None,
         }
     }
 
@@ -84,6 +128,11 @@ impl<M: Modem> Tnc<M> {
 
     pub fn set_echo(&mut self, on: bool) {
         self.echo = on;
+    }
+
+    /// Writes the receive and transmit levels to the debug log file once a second.
+    pub fn set_level_log(&mut self, on: bool) {
+        self.levels = on.then(|| Levels { since: self.station.now(), ..Levels::default() });
     }
 
     pub fn restart_requested(&self) -> bool {
@@ -179,6 +228,17 @@ impl<M: Modem> Tnc<M> {
             }
         }
         self.publish(input, output);
+        self.log_levels(input, output, now);
+    }
+
+    fn log_levels(&mut self, input: &[f64], output: &[f64], now: Time) {
+        let keyed = self.keyed && !self.forced_off;
+        let Some(l) = self.levels.as_mut() else { return };
+        l.feed(input, output, keyed);
+        if now - l.since >= SECOND {
+            xara_host::log::file_only(format_args!("{:10.3} {}", secs(now), l.line()));
+            *l = Levels { since: now, ..Levels::default() };
+        }
     }
 
     fn limit_tune(&mut self, now: Time) {
@@ -306,7 +366,10 @@ impl<M: Modem> Tnc<M> {
         let Some(t) = &self.telemetry else { return };
         match r {
             Response::Sn(sn) => t.update(|s| s.sn = Some(sn)),
-            Response::Bitrate { level, bps, tx } => t.update(|s| s.bitrate = Some(Bitrate { level, bps, tx })),
+            Response::Bitrate { level, bps, tx } => {
+                let modulation = self.modulation.clone();
+                t.update(|s| s.bitrate = Some(Bitrate { level, bps, tx, modulation }))
+            }
             Response::Disconnected => t.update(|s| (s.sn, s.bitrate) = (None, None)),
             _ => {}
         }
@@ -497,13 +560,21 @@ impl<M: Modem> Tnc<M> {
                 Report::UnencryptedLink => self.say(Response::UnencryptedLink),
                 Report::Line(l) => self.say(Response::Line(l)),
                 Report::Kiss(cmd, data) => {
+                    self.rx.kiss(&data);
                     if let Some(k) = &self.kiss {
                         k.send(cmd.byte(), &data);
                     }
                 }
-                Report::Bitrate { level, bps, tx } => self.say(Response::Bitrate { level, bps, tx }),
-                Report::Host(HostEvent::Data(d)) => self.host.data(&d),
+                Report::Bitrate { level, bps, tx, modulation } => {
+                    self.modulation = modulation;
+                    self.say(Response::Bitrate { level, bps, tx });
+                }
+                Report::Host(HostEvent::Data(d)) => {
+                    self.rx.data(&d);
+                    self.host.data(&d);
+                }
                 Report::Host(HostEvent::Disconnected) => {
+                    self.rx.disconnected();
                     let deferred = self.deferred_mycall.take();
                     if let Some(Err(Invalid)) = deferred {
                         self.say(Response::Wrong);
@@ -516,6 +587,9 @@ impl<M: Modem> Tnc<M> {
                 Report::Host(HostEvent::UnableToConnect) => self.emit(|| Event::UnableToConnect),
                 Report::Host(HostEvent::TimedOut) => self.emit(|| Event::TimedOut),
                 Report::Host(h) => {
+                    if let HostEvent::Connected { caller, answerer, .. } = &h {
+                        self.rx.connected(caller, answerer);
+                    }
                     if let Some(r) = response(h) {
                         self.say(r);
                     }

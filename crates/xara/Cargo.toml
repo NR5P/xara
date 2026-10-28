@@ -23,9 +23,10 @@ alsa-sys = { workspace = true, optional = true }
 xara-testkit.workspace = true
 
 [features]
-default = ["pulse", "alsa"]
+default = ["pulse", "alsa", "registered"]
 pulse = []
 alsa = ["dep:alsa-sys"]
+# Registered VARA speeds, built in as in the apps; on only with --registered, for a user with a VARA licence.
 registered = []
 fixed-turbo = ["xara-phy/fixed-turbo"]
 float-turbo = ["xara-phy/float-turbo"]
