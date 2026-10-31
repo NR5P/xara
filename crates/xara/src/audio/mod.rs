@@ -46,6 +46,11 @@ fn remaining(until: std::time::Instant, what: &str) -> io::Result<Duration> {
 pub trait Audio {
     fn read(&mut self, x: &mut [i16]) -> io::Result<()>;
     fn write(&mut self, x: &[i16]) -> io::Result<()>;
+    /// How long audio written now takes to reach the output (a sound server's buffer):
+    /// allowed for like --audio-latency-ms, so PTT stays keyed until it has played out.
+    fn output_latency(&self) -> std::time::Duration {
+        std::time::Duration::ZERO
+    }
 }
 
 pub fn sample(v: i16) -> f64 {

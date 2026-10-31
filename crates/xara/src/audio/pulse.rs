@@ -179,6 +179,14 @@ impl Audio for PulseIo {
         Ok(())
     }
 
+    fn output_latency(&self) -> std::time::Duration {
+        // (the sound server keeps about this much queued ahead of the device)
+        match self.play {
+            Some(_) => std::time::Duration::from_millis(u64::from(PLAYBACK_BUFFER_MS)),
+            None => std::time::Duration::ZERO,
+        }
+    }
+
     fn write(&mut self, x: &[i16]) -> io::Result<()> {
         let Some(play) = &mut self.play else { return Err(capture_only()) };
         self.tx.clear();
