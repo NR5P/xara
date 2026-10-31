@@ -641,11 +641,29 @@ fn pump(
     let mut tx = audio::TxAudio::new(lead_samples(a));
     let (mut x, mut out) = (vec![0.0; audio::BLOCK], vec![0.0; audio::BLOCK]);
     let (mut rx, mut sent) = (vec![0i16; audio::BLOCK], vec![0i16; audio::BLOCK]);
+    // A loop turn that takes long starves the playback buffer (a hole of silence on the air):
+    // say so, at most once a second, with where the time went.
+    let mut slow_said = std::time::Instant::now() - Duration::from_secs(2);
     let audio = (|| {
         while !stop.load(Ordering::SeqCst) {
+            let t0 = std::time::Instant::now();
             io.read(&mut rx)?;
+            let t1 = std::time::Instant::now();
             x.iter_mut().zip(&rx).for_each(|(v, &s)| *v = audio::sample(s));
             let Tick { keyed, tuning, restart } = process(&x, &mut out, ptt.as_ref().is_some_and(PttCtl::forced_off));
+            let t2 = std::time::Instant::now();
+            let (waited, worked) = (t1 - t0, t2 - t1);
+            if (waited > Duration::from_millis(50) || worked > Duration::from_millis(30))
+                && t2 - slow_said > Duration::from_secs(1)
+            {
+                slow_said = t2;
+                say!(
+                    "audio loop slow{}: capture read waited {} ms, processing took {} ms",
+                    if keyed { " while keyed" } else { "" },
+                    waited.as_millis(),
+                    worked.as_millis()
+                );
+            }
             if keyed {
                 if let Err(e) = ptt.as_mut().map_or(Ok(()), |p| p.set(true)) {
                     ptt_result = Err(e);

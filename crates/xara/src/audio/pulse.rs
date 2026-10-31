@@ -89,7 +89,7 @@ fn check_playback(sinks: &[Sink], name: &str, radio: bool) -> io::Result<()> {
 }
 
 /// Playback buffer the sound server keeps for us (see `connect`).
-const PLAYBACK_BUFFER_MS: u32 = 60;
+const PLAYBACK_BUFFER_MS: u32 = 150;
 
 fn bytes(ms: u32) -> u32 {
     RATE / 1000 * ms * 2
@@ -133,10 +133,11 @@ impl PulseIo {
         let play = match playback {
             Some((name, _)) => {
                 let mut p = Stream::new(&conn, c"tx", &SPEC).ok_or_else(|| io::Error::other("pulse stream"))?;
-                // 60 ms of playback buffer: with 20 ms, a late turn of the modem loop (the
-                // capture side runs in 10 ms pieces, on a different PipeWire cycle) left the
-                // sink a 5-10 ms hole of silence about twice a second, heard on the radio as
-                // crackle. PTT tail (100 ms by default) covers the extra buffered audio.
+                // A deep playback buffer: xara writes TX audio as capture blocks come in, and
+                // a radio's USB sound card is two PipeWire devices on their own cycles (an
+                // FTDX3000: capture 256, playback 512). With 20 ms, then 60 ms, a late capture
+                // block left the sink whole cycles of silence (crackle; frames failing, the
+                // link falling back to 18 bps). The buffer is allowed for as output latency.
                 p.connect_playback(name, &attr(u32::MAX, bytes(PLAYBACK_BUFFER_MS)), flags)?;
                 Some((p, name))
             }
