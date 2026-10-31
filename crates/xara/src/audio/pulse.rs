@@ -88,6 +88,9 @@ fn check_playback(sinks: &[Sink], name: &str, radio: bool) -> io::Result<()> {
     Ok(())
 }
 
+/// Playback buffer the sound server keeps for us (see `connect`).
+const PLAYBACK_BUFFER_MS: u32 = 60;
+
 fn bytes(ms: u32) -> u32 {
     RATE / 1000 * ms * 2
 }
@@ -130,7 +133,11 @@ impl PulseIo {
         let play = match playback {
             Some((name, _)) => {
                 let mut p = Stream::new(&conn, c"tx", &SPEC).ok_or_else(|| io::Error::other("pulse stream"))?;
-                p.connect_playback(name, &attr(u32::MAX, bytes(20)), flags)?;
+                // 60 ms of playback buffer: with 20 ms, a late turn of the modem loop (the
+                // capture side runs in 10 ms pieces, on a different PipeWire cycle) left the
+                // sink a 5-10 ms hole of silence about twice a second, heard on the radio as
+                // crackle. PTT tail (100 ms by default) covers the extra buffered audio.
+                p.connect_playback(name, &attr(u32::MAX, bytes(PLAYBACK_BUFFER_MS)), flags)?;
                 Some((p, name))
             }
             None => None,
