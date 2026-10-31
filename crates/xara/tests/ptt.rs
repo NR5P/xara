@@ -10,8 +10,14 @@ use xara::ptt::{Cm108, Event, Ptt, PttCtl, PttSpec, PttTiming, Rigctld, Serial, 
 #[test]
 fn ptt_spec_parse() {
     assert_eq!(PttSpec::parse("vox"), Ok(PttSpec::Vox));
-    assert_eq!(PttSpec::parse("rts:/dev/ttyACM0"), Ok(PttSpec::Rts("/dev/ttyACM0".into())));
-    assert_eq!(PttSpec::parse("dtr:/dev/ttyUSB1"), Ok(PttSpec::Dtr("/dev/ttyUSB1".into())));
+    // Serial ports are device paths on Unix and COM ports on Windows.
+    let (acm, usb, bare) = if cfg!(windows) { ("COM3", "COM12", "ttyACM0") } else { ("/dev/ttyACM0", "/dev/ttyUSB1", "ttyACM0") };
+    assert_eq!(PttSpec::parse(&format!("rts:{acm}")), Ok(PttSpec::Rts(acm.into())));
+    assert_eq!(PttSpec::parse(&format!("dtr:{usb}")), Ok(PttSpec::Dtr(usb.into())));
+    assert!(PttSpec::parse(&format!("rts:{bare}")).is_err());
+    if cfg!(windows) {
+        assert!(PttSpec::parse("rts:/dev/ttyACM0").is_err());
+    }
     assert_eq!(PttSpec::parse("cm108:/dev/hidraw2"), Ok(PttSpec::Cm108 { path: "/dev/hidraw2".into(), gpio: 3 }));
     assert_eq!(PttSpec::parse("cm108:/dev/hidraw2:4"), Ok(PttSpec::Cm108 { path: "/dev/hidraw2".into(), gpio: 4 }));
     let usb = |vendor, product, gpio| Ok(PttSpec::Cm108Usb { vendor, product, gpio });
@@ -69,6 +75,7 @@ impl Drop for Scratch {
     }
 }
 
+#[cfg(unix)]
 #[test]
 fn serial_refuses_non_serial_devices() {
     assert!(Serial::open("/dev/null", libc::TIOCM_RTS).is_err());
@@ -84,6 +91,15 @@ fn serial_refuses_non_serial_devices() {
     unsafe {
         libc::close(m);
         libc::close(s);
+    }
+}
+
+#[cfg(windows)]
+#[test]
+fn serial_refuses_non_serial_devices() {
+    use xara::winserial::Line;
+    for name in ["NUL", "COM", "/dev/ttyUSB0", "COM250"] {
+        assert!(Serial::open(name, Line::Rts).is_err(), "{name}");
     }
 }
 
@@ -670,7 +686,7 @@ fn is_hidraw_accepts_only_hidraw_char_devices() {
     assert!(!xara::ptt::is_hidraw("/nonexistent"));
     assert!(!xara::ptt::is_hidraw(Scratch::new("plain").path()));
     if let Some(h) =
-        std::fs::read_dir("/dev").unwrap().flatten().find(|e| e.file_name().to_string_lossy().starts_with("hidraw"))
+        std::fs::read_dir("/dev").into_iter().flatten().flatten().find(|e| e.file_name().to_string_lossy().starts_with("hidraw"))
     {
         assert!(xara::ptt::is_hidraw(h.path().to_str().unwrap()));
     }

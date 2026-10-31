@@ -1,8 +1,12 @@
 use std::cell::Cell;
 use std::fs::{File, OpenOptions};
-use std::io::{self, BufRead, BufReader, IsTerminal, Write};
+#[cfg(unix)]
+use std::io::IsTerminal;
+use std::io::{self, BufRead, BufReader, Write};
 use std::net::{TcpStream, ToSocketAddrs};
+#[cfg(unix)]
 use std::os::fd::AsRawFd;
+#[cfg(unix)]
 use std::os::unix::fs::OpenOptionsExt;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{self, RecvTimeoutError, Sender};
@@ -32,8 +36,10 @@ impl PttSpec {
     pub fn parse(s: &str) -> Result<Self, String> {
         let (kind, rest) = s.split_once(':').unwrap_or((s, ""));
         let path = |what: &str| {
-            if rest.starts_with('/') {
+            if is_serial_device(rest) {
                 Ok(rest.to_string())
+            } else if cfg!(windows) {
+                Err(format!("--ptt {what}: needs a serial port, e.g. {what}:COM3"))
             } else {
                 Err(format!("--ptt {what}: needs a device path, e.g. {what}:/dev/ttyACM0"))
             }
@@ -76,8 +82,14 @@ impl PttSpec {
     pub fn open(&self) -> io::Result<Box<dyn Ptt>> {
         Ok(match self {
             Self::Vox => Box::new(Vox),
+            #[cfg(unix)]
             Self::Rts(p) => Box::new(Serial::open(p, libc::TIOCM_RTS)?),
+            #[cfg(unix)]
             Self::Dtr(p) => Box::new(Serial::open(p, libc::TIOCM_DTR)?),
+            #[cfg(windows)]
+            Self::Rts(p) => Box::new(Serial::open(p, crate::winserial::Line::Rts)?),
+            #[cfg(windows)]
+            Self::Dtr(p) => Box::new(Serial::open(p, crate::winserial::Line::Dtr)?),
             Self::Cm108 { path, gpio } => Box::new(Cm108::open(path, *gpio)?),
             #[cfg(target_os = "macos")]
             Self::Cm108Usb { vendor, product, gpio } => Box::new(Cm108Usb::open(*vendor, *product, *gpio)?),
@@ -117,19 +129,31 @@ impl Ptt for Trusdx {
     }
 }
 
+#[cfg(unix)]
+fn is_serial_device(s: &str) -> bool {
+    s.starts_with('/')
+}
+
+#[cfg(windows)]
+fn is_serial_device(s: &str) -> bool {
+    crate::winserial::is_port(s)
+}
+
 #[cfg(target_os = "linux")]
 type IoctlReq = libc::Ioctl;
 #[cfg(target_os = "android")]
 type IoctlReq = libc::c_int;
-#[cfg(not(any(target_os = "linux", target_os = "android")))]
+#[cfg(all(unix, not(any(target_os = "linux", target_os = "android"))))]
 type IoctlReq = libc::c_ulong;
 
+#[cfg(unix)]
 pub struct Serial {
     f: File,
     path: String,
     line: libc::c_int,
 }
 
+#[cfg(unix)]
 impl Serial {
     pub fn open(path: &str, line: libc::c_int) -> io::Result<Self> {
         let f = OpenOptions::new().read(true).write(true).custom_flags(libc::O_NOCTTY | libc::O_NONBLOCK).open(path)?;
@@ -157,6 +181,7 @@ impl Serial {
     }
 }
 
+#[cfg(unix)]
 impl Ptt for Serial {
     fn set(&mut self, on: bool) -> io::Result<()> {
         self.modem(if on { libc::TIOCMBIS } else { libc::TIOCMBIC }, self.line)?;
@@ -168,6 +193,37 @@ impl Ptt for Serial {
 
     fn describe(&self) -> String {
         format!("{} on {} (other line held low)", if self.line == libc::TIOCM_RTS { "RTS" } else { "DTR" }, self.path)
+    }
+}
+
+#[cfg(windows)]
+pub struct Serial {
+    f: File,
+    path: String,
+    line: crate::winserial::Line,
+}
+
+#[cfg(windows)]
+impl Serial {
+    pub fn open(path: &str, line: crate::winserial::Line) -> io::Result<Self> {
+        use crate::winserial::{self, Line};
+        let f = winserial::open(path)?;
+        winserial::set_line(&f, Line::Rts, false)?;
+        winserial::set_line(&f, Line::Dtr, false)?;
+        Ok(Self { f, path: path.into(), line })
+    }
+}
+
+#[cfg(windows)]
+impl Ptt for Serial {
+    fn set(&mut self, on: bool) -> io::Result<()> {
+        crate::winserial::set_line(&self.f, self.line, on)
+            .map_err(|e| io::Error::other(format!("{}: {e}", self.path)))
+    }
+
+    fn describe(&self) -> String {
+        let line = if self.line == crate::winserial::Line::Rts { "RTS" } else { "DTR" };
+        format!("{line} on {} (other line held low)", self.path)
     }
 }
 

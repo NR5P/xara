@@ -3,6 +3,7 @@ use crate::command::{Command, parse};
 use crate::writer::Writer;
 use std::io::{self, Read};
 use std::net::{SocketAddr, TcpListener, TcpStream};
+#[cfg(unix)]
 use std::os::fd::AsRawFd;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, SyncSender, sync_channel};
@@ -216,12 +217,22 @@ fn pause(listener: &TcpListener) -> io::Result<Paused> {
     }
 }
 
-#[cfg(not(any(target_os = "linux", target_os = "android")))]
+#[cfg(all(unix, not(any(target_os = "linux", target_os = "android"))))]
 fn reset(c: &TcpStream) {
     let linger = libc::linger { l_onoff: 1, l_linger: 0 };
     let len = std::mem::size_of_val(&linger) as libc::socklen_t;
     // SAFETY: c is an open socket and linger is valid for the call; closing it then sends a reset.
     unsafe { libc::setsockopt(c.as_raw_fd(), libc::SOL_SOCKET, libc::SO_LINGER, (&raw const linger).cast(), len) };
+}
+
+#[cfg(windows)]
+fn reset(c: &TcpStream) {
+    use std::os::windows::io::AsRawSocket;
+    use windows_sys::Win32::Networking::WinSock::{LINGER, SO_LINGER, SOL_SOCKET, setsockopt};
+    let linger = LINGER { l_onoff: 1, l_linger: 0 };
+    let len = std::mem::size_of_val(&linger) as i32;
+    // SAFETY: c is an open socket and linger is valid for the call; closing it then sends a reset.
+    unsafe { setsockopt(c.as_raw_socket() as usize, SOL_SOCKET, SO_LINGER, (&raw const linger).cast(), len) };
 }
 
 #[cfg(not(any(target_os = "linux", target_os = "android")))]

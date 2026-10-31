@@ -17,7 +17,9 @@ pub fn is_meta(k: &str) -> bool {
     matches!(k, "--help" | "-h" | "--version" | "-V")
 }
 
-const README: &str = include_str!("../README.md");
+// The workspace README itself: crates/xara/README.md is a symlink to it, which a Windows
+// checkout makes a text file holding the link's target.
+const README: &str = include_str!("../../../README.md");
 const FOOTER: &str = "copyright (c) 2026 x0rro\nreleased under MIT license, see LICENSE\n";
 
 pub struct Usage {

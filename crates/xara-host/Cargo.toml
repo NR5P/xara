@@ -12,5 +12,8 @@ description = "VARA-compatible command, data and KISS TCP host ports for the xar
 [dependencies]
 libc.workspace = true
 
+[target.'cfg(windows)'.dependencies]
+windows-sys.workspace = true
+
 [dev-dependencies]
 xara-testkit.workspace = true

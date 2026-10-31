@@ -4,9 +4,13 @@
 //! through its USB host API).
 
 use std::collections::VecDeque;
-use std::fs::{File, OpenOptions};
+use std::fs::File;
+#[cfg(unix)]
+use std::fs::OpenOptions;
 use std::io::{self, Read, Write};
+#[cfg(unix)]
 use std::os::fd::AsRawFd;
+#[cfg(unix)]
 use std::os::unix::fs::OpenOptionsExt;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError};
@@ -130,6 +134,7 @@ impl Port {
     }
 }
 
+#[cfg(unix)]
 fn termios(f: &File, path: &str) -> io::Result<()> {
     let fd = f.as_raw_fd();
     let err = |what: &str| io::Error::other(format!("{path}: {what}: {}", io::Error::last_os_error()));
@@ -161,10 +166,37 @@ fn port_name(capture: &str, playback: &str) -> io::Result<String> {
             "--audio trusdx: --capture and --playback are both the radio's serial port (got {capture:?} and {playback:?})"
         )));
     }
-    if capture != APP && !capture.starts_with('/') {
+    if capture != APP && !is_serial_device(capture) {
         return Err(io::Error::other(format!("--audio trusdx: {capture:?} is not a serial device path or {APP}")));
     }
     Ok(capture.to_string())
+}
+
+#[cfg(unix)]
+fn is_serial_device(s: &str) -> bool {
+    s.starts_with('/')
+}
+
+#[cfg(windows)]
+fn is_serial_device(s: &str) -> bool {
+    crate::winserial::is_port(s)
+}
+
+#[cfg(unix)]
+fn open_port(name: &str) -> io::Result<File> {
+    let f = OpenOptions::new().read(true).write(true).custom_flags(libc::O_NOCTTY).open(name)?;
+    termios(&f, name)?;
+    Ok(f)
+}
+
+/// Reads return within 5 ms: a read and a write on one Windows handle take turns, so a long
+/// read would hold up transmit audio.
+#[cfg(windows)]
+fn open_port(name: &str) -> io::Result<File> {
+    let f = crate::winserial::open(name)?;
+    crate::winserial::configure_raw(&f, BAUD, 5)
+        .map_err(|e| io::Error::other(format!("{name}: setting 115200 8N1: {e}")))?;
+    Ok(f)
 }
 
 pub fn check(playback: &str, _radio: bool) -> io::Result<()> {
@@ -172,6 +204,15 @@ pub fn check(playback: &str, _radio: bool) -> io::Result<()> {
 }
 
 /// Serial ports that could be a (tr)uSDX: its CH340 USB-serial chip, or any USB serial port.
+#[cfg(windows)]
+pub fn list() -> io::Result<(DeviceList, DeviceList)> {
+    let mut ports: DeviceList =
+        crate::winserial::ports().into_iter().map(|p| (p, "serial port".to_string())).collect();
+    ports.push((APP.into(), "a port the app embedding xara carries".into()));
+    Ok((ports.clone(), ports))
+}
+
+#[cfg(unix)]
 pub fn list() -> io::Result<(DeviceList, DeviceList)> {
     let prefixes = ["ttyUSB", "ttyACM", "cu.wchusbserial", "cu.usbserial", "cu.usbmodem"];
     let mut ports: DeviceList = std::fs::read_dir("/dev")
@@ -211,8 +252,7 @@ impl TrusdxIo {
             APP_PORT.to_radio.lock().unwrap_or_else(PoisonError::into_inner).clear();
             (Port::App, None)
         } else {
-            let f = OpenOptions::new().read(true).write(true).custom_flags(libc::O_NOCTTY).open(&name)?;
-            termios(&f, &name)?;
+            let f = open_port(&name)?;
             let (mut r, s) = (f.try_clone()?, shared.clone());
             let reader = thread::Builder::new().name("trusdx".into()).spawn(move || {
                 let mut buf = [0u8; 1024];
@@ -308,10 +348,11 @@ mod tests {
 
     #[test]
     fn the_port_is_one_device_for_capture_and_playback() {
-        assert!(port_name("/dev/ttyUSB0", "/dev/ttyUSB0").is_ok());
-        assert!(port_name("/dev/ttyUSB0", "").is_ok());
+        let (a, b) = if cfg!(windows) { ("COM3", "COM4") } else { ("/dev/ttyUSB0", "/dev/ttyUSB1") };
+        assert!(port_name(a, a).is_ok());
+        assert!(port_name(a, "").is_ok());
         assert!(port_name(APP, APP).is_ok());
-        assert!(port_name("/dev/ttyUSB0", "/dev/ttyUSB1").is_err());
+        assert!(port_name(a, b).is_err());
         assert!(port_name("default", "default").is_err());
     }
 

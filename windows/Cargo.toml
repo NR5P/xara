@@ -1,0 +1,35 @@
+# The Windows app: the same Rust modem as the `xara` command, linked in through
+# crates/xara-ffi as the Mac, iOS and Android apps do, with a window and a tray icon.
+[package]
+name = "xara-windows"
+version = "0.1.1"
+edition = "2024"
+rust-version = "1.85"
+publish = false
+license = "MIT"
+description = "xara for Windows: the VARA-compatible modem with a window and a tray icon"
+
+# Not part of the root workspace: this folder builds on its own, into its own target/.
+[workspace]
+
+[[bin]]
+name = "xara-app"
+path = "src/main.rs"
+
+[dependencies]
+# Registered VARA speeds are built in but used only when the user says they hold a VARA licence.
+xara-ffi = { path = "../crates/xara-ffi", features = ["registered"] }
+xara = { path = "../crates/xara", default-features = false }
+eframe = { version = "0.30", default-features = false, features = ["default_fonts", "glow", "persistence"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+open = "5"
+tray-icon = "0.19"
+raw-window-handle = "0.6"
+windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_UI_WindowsAndMessaging", "Win32_System_Registry", "Win32_Networking_WinSock"] }
+
+[build-dependencies]
+embed-resource = "3"
+
+[profile.release]
+strip = true

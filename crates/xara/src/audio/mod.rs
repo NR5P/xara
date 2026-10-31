@@ -13,10 +13,12 @@ pub mod pulse;
 #[cfg(pulse)]
 mod pulse_ffi;
 pub mod trusdx;
+#[cfg(wasapi)]
+pub mod wasapi;
 
-#[cfg(not(any(pulse, alsa, coreaudio, aaudio)))]
+#[cfg(not(any(pulse, alsa, coreaudio, aaudio, wasapi)))]
 compile_error!(
-    "xara needs an audio backend: enable the pulse or alsa feature (Linux), or build for macOS, iOS or Android"
+    "xara needs an audio backend: enable the pulse or alsa feature (Linux), or build for macOS, iOS, Android or Windows"
 );
 
 use std::collections::VecDeque;
@@ -33,7 +35,7 @@ fn capture_only() -> io::Error {
     io::Error::new(io::ErrorKind::Unsupported, "write to a capture-only audio device")
 }
 
-#[cfg(any(pulse, alsa, coreaudio))]
+#[cfg(any(pulse, alsa, coreaudio, wasapi))]
 fn remaining(until: std::time::Instant, what: &str) -> io::Result<Duration> {
     until
         .checked_duration_since(std::time::Instant::now())
@@ -83,6 +85,7 @@ pub enum Backend {
     Alsa,
     CoreAudio,
     AAudio,
+    Wasapi,
     /// A (tr)uSDX's audio inside its CAT serial stream, on any platform.
     Trusdx,
 }
@@ -93,6 +96,8 @@ impl Default for Backend {
             Self::CoreAudio
         } else if cfg!(aaudio) {
             Self::AAudio
+        } else if cfg!(wasapi) {
+            Self::Wasapi
         } else if cfg!(pulse) {
             Self::Pulse
         } else {
@@ -110,8 +115,9 @@ impl std::str::FromStr for Backend {
             "alsa" => Self::Alsa,
             "coreaudio" => Self::CoreAudio,
             "aaudio" => Self::AAudio,
+            "wasapi" => Self::Wasapi,
             "trusdx" => Self::Trusdx,
-            _ => return Err(format!("--audio {s:?}: expected pulse, alsa, coreaudio, aaudio or trusdx")),
+            _ => return Err(format!("--audio {s:?}: expected pulse, alsa, coreaudio, aaudio, wasapi or trusdx")),
         };
         if b.built() { Ok(b) } else { Err(format!("--audio {s}: {}", unbuilt_why(b))) }
     }
@@ -124,6 +130,7 @@ impl Backend {
             Self::Alsa => cfg!(alsa),
             Self::CoreAudio => cfg!(coreaudio),
             Self::AAudio => cfg!(aaudio),
+            Self::Wasapi => cfg!(wasapi),
             Self::Trusdx => true,
         }
     }
@@ -134,6 +141,7 @@ impl Backend {
             Self::Alsa => "alsa",
             Self::CoreAudio => "coreaudio",
             Self::AAudio => "aaudio",
+            Self::Wasapi => "wasapi",
             Self::Trusdx => "trusdx",
         }
     }
@@ -143,12 +151,13 @@ fn unbuilt_why(b: Backend) -> String {
     match b {
         Backend::CoreAudio => "CoreAudio is only available on macOS and iOS".into(),
         Backend::AAudio => "AAudio is only available on Android".into(),
+        Backend::Wasapi => "WASAPI is only available on Windows".into(),
         _ if !cfg!(target_os = "linux") => format!("{} is only available on Linux", b.name()),
         _ => format!("this xara was built without the {} feature", b.name()),
     }
 }
 
-#[cfg(not(all(pulse, alsa, coreaudio, aaudio)))]
+#[cfg(not(all(pulse, alsa, coreaudio, aaudio, wasapi)))]
 fn unbuilt(b: Backend) -> io::Error {
     io::Error::other(unbuilt_why(b))
 }
@@ -163,8 +172,10 @@ pub fn open(b: Backend, capture: &str, playback: &str, radio: bool) -> io::Resul
         Backend::CoreAudio => Ok(Box::new(coreaudio::CoreAudioIo::open(capture, playback, radio)?)),
         #[cfg(aaudio)]
         Backend::AAudio => Ok(Box::new(aaudio::AAudioIo::open(capture, playback, radio)?)),
+        #[cfg(wasapi)]
+        Backend::Wasapi => Ok(Box::new(wasapi::WasapiIo::open(capture, playback, radio)?)),
         Backend::Trusdx => Ok(Box::new(trusdx::TrusdxIo::open(capture, playback, radio)?)),
-        #[cfg(not(all(pulse, alsa, coreaudio, aaudio)))]
+        #[cfg(not(all(pulse, alsa, coreaudio, aaudio, wasapi)))]
         _ => Err(unbuilt(b)),
     }
 }
@@ -179,8 +190,10 @@ pub fn check_playback(b: Backend, playback: &str, radio: bool) -> io::Result<()>
         Backend::CoreAudio => coreaudio::check(playback, radio),
         #[cfg(aaudio)]
         Backend::AAudio => aaudio::check(playback, radio),
+        #[cfg(wasapi)]
+        Backend::Wasapi => wasapi::check(playback, radio),
         Backend::Trusdx => trusdx::check(playback, radio),
-        #[cfg(not(all(pulse, alsa, coreaudio, aaudio)))]
+        #[cfg(not(all(pulse, alsa, coreaudio, aaudio, wasapi)))]
         _ => Err(unbuilt(b)),
     }
 }
@@ -195,8 +208,10 @@ pub fn list(b: Backend) -> io::Result<(DeviceList, DeviceList)> {
         Backend::CoreAudio => coreaudio::list(),
         #[cfg(aaudio)]
         Backend::AAudio => aaudio::list(),
+        #[cfg(wasapi)]
+        Backend::Wasapi => wasapi::list(),
         Backend::Trusdx => trusdx::list(),
-        #[cfg(not(all(pulse, alsa, coreaudio, aaudio)))]
+        #[cfg(not(all(pulse, alsa, coreaudio, aaudio, wasapi)))]
         _ => Err(unbuilt(b)),
     }
 }
@@ -211,8 +226,10 @@ pub fn open_capture(b: Backend, capture: &str) -> io::Result<Box<dyn Audio>> {
         Backend::CoreAudio => Ok(Box::new(coreaudio::CoreAudioIo::open_capture(capture)?)),
         #[cfg(aaudio)]
         Backend::AAudio => Ok(Box::new(aaudio::AAudioIo::open_capture(capture)?)),
+        #[cfg(wasapi)]
+        Backend::Wasapi => Ok(Box::new(wasapi::WasapiIo::open_capture(capture)?)),
         Backend::Trusdx => Ok(Box::new(trusdx::TrusdxIo::open_capture(capture)?)),
-        #[cfg(not(all(pulse, alsa, coreaudio, aaudio)))]
+        #[cfg(not(all(pulse, alsa, coreaudio, aaudio, wasapi)))]
         _ => Err(unbuilt(b)),
     }
 }

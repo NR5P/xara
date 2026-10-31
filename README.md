@@ -1,7 +1,7 @@
 # xara
 
-a VARA-compatible modem for linux and macOS, with apps for iPhone/iPad and
-Android.
+a VARA-compatible modem for linux, macOS and Windows, with apps for
+iPhone/iPad and Android.
 tested against VARA HF 4.9.0 and FM 4.4.0.
 
 ## minimum config
@@ -23,6 +23,7 @@ to transmit, add `--radio` and `--ptt` flags.
  - `xara-monitor`: passive VARA HF monitor (with web UI)
  - iOS app: the same modem on an iPhone or iPad, see [iOS](#ios)
  - Android app: the same modem on an Android phone or tablet, see [Android](#android)
+ - Windows app: the same modem with a window and a tray icon, see [Windows](#windows)
 
 ## building
 
@@ -70,6 +71,34 @@ to start xara at login, edit and load the launchd agent in `dist/launchd`:
     cp dist/launchd/xara.plist ~/Library/LaunchAgents/
     launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/xara.plist
 
+### Windows
+
+no extra deps beyond rust (the MSVC toolchain, with Visual Studio's C++ build
+tools): audio goes through WASAPI (`--audio wasapi`, the default on Windows),
+and Windows converts xara's 48 kHz mono to and from each device's own format.
+
+devices are named by their name as Windows shows it, or by a piece of it that
+fits only one device; list them with:
+
+    xara --list-devices
+
+    xara --call YOURCALL --hf 2300 \
+         --capture "Microphone (USB Audio CODEC )" \
+         --playback "Speakers (USB Audio CODEC )" \
+         --radio --ptt rts:COM3
+
+serial ports for PTT and the (tr)uSDX are COM ports (`rts:COM3`). without
+`--radio`, playback is only allowed into a virtual device such as
+[VB-CABLE](https://vb-audio.com/Cable/), which is also how to loop xara and
+VARA (or two xaras) together on one PC: one cable each way, e.g. VB-CABLE
+from VARA to xara and VB-Audio's Hi-Fi Cable from xara to VARA. CM108 HID PTT
+is not available on Windows yet; use VOX, serial or rigctld.
+
+for a window instead of the command line, `windows/` has a Windows app with
+the same modem, settings and a tray icon, like the Mac app; see
+[windows/README.md](windows/README.md). `windows\install.ps1` builds and
+installs the app and the commands for your user.
+
 ### iOS
 
 `ios/` is an iPhone and iPad app that runs this same modem: not a rewrite,
@@ -114,7 +143,8 @@ see [android/README.md](android/README.md) for the details.
 
     --call CALL             your callsign (required)
 
-    --audio pulse|alsa|coreaudio|trusdx  audio path (coreaudio on macOS)
+    --audio pulse|alsa|coreaudio|wasapi|trusdx  audio path (coreaudio on macOS,
+                            wasapi on Windows)
     --list-devices          list capture and playback devices, then exit
     --capture SOURCE        audio source
     --playback SINK         audio sink
@@ -215,7 +245,8 @@ options:
     --wav FILE              load from a wav file
     --stdin RATE            s16le mono at RATE Hz
 
-    --audio pulse|alsa|coreaudio  audio path (coreaudio on macOS)
+    --audio pulse|alsa|coreaudio|wasapi  audio path (coreaudio on macOS,
+                            wasapi on Windows)
     --capture SOURCE        audio source
 
     --hf 500|2300|2750      HF bandwidth (default 2300)

@@ -59,6 +59,14 @@ impl Writer {
 
     pub fn close(&self) {
         let _ = self.s.shutdown(Shutdown::Both);
+        // Linux wakes a read blocked on this socket in another thread when it is shut down;
+        // Windows does not, so cancel that read (it then fails, and the reader ends).
+        #[cfg(windows)]
+        {
+            use std::os::windows::io::AsRawSocket;
+            // SAFETY: the socket is open; cancelling its pending I/O only fails those calls.
+            unsafe { windows_sys::Win32::System::IO::CancelIoEx(self.s.as_raw_socket() as _, std::ptr::null()) };
+        }
     }
 
     pub fn finish(&self) {

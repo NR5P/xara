@@ -11,7 +11,8 @@ pub fn check(file: &str, got: &str) {
         std::fs::write(&path, got).unwrap();
         return;
     }
-    let want = std::fs::read_to_string(&path).unwrap_or_default();
+    // A Windows checkout may have given the file CRLF line ends.
+    let want = std::fs::read_to_string(&path).unwrap_or_default().replace("\r\n", "\n");
     if got == want {
         return;
     }

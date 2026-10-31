@@ -19,6 +19,10 @@ libc.workspace = true
 [target.'cfg(target_os = "linux")'.dependencies]
 alsa-sys = { workspace = true, optional = true }
 
+[target.'cfg(windows)'.dependencies]
+windows.workspace = true
+windows-sys.workspace = true
+
 [dev-dependencies]
 xara-testkit.workspace = true
 

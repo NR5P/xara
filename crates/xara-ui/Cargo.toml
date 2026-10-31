@@ -16,3 +16,6 @@ rustfft.workspace = true
 
 [dev-dependencies]
 xara-testkit.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+windows-sys.workspace = true

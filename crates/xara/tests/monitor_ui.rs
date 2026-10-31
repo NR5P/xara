@@ -1,3 +1,6 @@
+// The tests that end the monitor with SIGTERM are Unix-only; on Windows their helpers go unused.
+#![cfg_attr(windows, allow(dead_code, unused_imports))]
+
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::process::{Child, Command, ExitStatus, Stdio};
@@ -116,6 +119,8 @@ fn open(port: u16, path: &str) -> TcpStream {
     }
 }
 
+// Ends the monitor with SIGTERM, which Windows does not have.
+#[cfg(unix)]
 #[test]
 fn monitor_serves_a_read_only_page_and_keeps_it_after_the_input() {
     let Ui { mut child, port, stdout, stderr } = start_ui(&["--stdin", "48000", "--hf", "2300", "--json"]);

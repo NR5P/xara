@@ -414,16 +414,22 @@ fn streams_and_viewers_cannot_take_the_control_slot() {
 
 #[test]
 fn stored_token_is_private_and_stable() {
-    use std::os::unix::fs::PermissionsExt;
     let tmp = Scratch::new("token");
     let dir = &tmp.0;
     let t = stored_token(dir).unwrap();
     let path = dir.join(TOKEN_FILE);
-    let mode = || std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
-    assert!(valid_token(&t) && mode() == 0o600);
-    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
+    assert!(valid_token(&t));
+    // Unix permission bits; on Windows a file under the user's profile is the user's.
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = || std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode(), 0o600);
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
+        assert_eq!(stored_token(dir).unwrap(), t);
+        assert_eq!(mode(), 0o600);
+    }
     assert_eq!(stored_token(dir).unwrap(), t);
-    assert_eq!(mode(), 0o600);
     std::fs::write(&path, "bad\n").unwrap();
     assert_ne!(stored_token(dir).unwrap(), t);
 }

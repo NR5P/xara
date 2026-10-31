@@ -322,7 +322,8 @@ fn default_config() -> Option<PathBuf> {
     let base = std::env::var_os("XDG_CONFIG_HOME")
         .filter(|d| !d.is_empty())
         .map(PathBuf::from)
-        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".config")))?;
+        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".config")))
+        .or_else(|| std::env::var_os("APPDATA").map(PathBuf::from))?;
     Some(base.join("xara/xara.conf")).filter(|p| p.exists())
 }
 
@@ -357,6 +358,14 @@ fn state_dir(a: &Args) -> Option<PathBuf> {
     (!dir.is_empty()).then(|| PathBuf::from(dir))
 }
 
+#[cfg(windows)]
+fn make_state_dir(d: &Path) -> Result<Option<String>, String> {
+    // A new folder under the user profile is private to the user already.
+    std::fs::create_dir_all(d).map_err(|e| format!("{}: {e}", d.display()))?;
+    Ok(None)
+}
+
+#[cfg(unix)]
 fn make_state_dir(d: &Path) -> Result<Option<String>, String> {
     use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
     let err = |e: std::io::Error| format!("{}: {e}", d.display());
@@ -690,6 +699,31 @@ fn open_audio(
     }
 }
 
+/// Windows cannot replace a running program, so the new xara runs as a child on the same
+/// console, and its exit status becomes this one's.
+#[cfg(windows)]
+fn restart(argv: &[String], token: Option<&str>, record_part: Option<u32>) -> ExitCode {
+    let err = match std::env::current_exe() {
+        Ok(exe) => {
+            let mut c = std::process::Command::new(exe);
+            if let Some(t) = token {
+                c.env(TOKEN_ENV, t);
+            }
+            if let Some(n) = record_part {
+                c.env(RECORD_PART_ENV, n.to_string());
+            }
+            match c.args(argv).status() {
+                Ok(s) => return ExitCode::from(s.code().map_or(1, |c| c as u8)),
+                Err(e) => e,
+            }
+        }
+        Err(e) => e,
+    };
+    say!("restart failed: {err}");
+    ExitCode::from(EXIT_RESTART_FAILED)
+}
+
+#[cfg(unix)]
 fn restart(argv: &[String], token: Option<&str>, record_part: Option<u32>) -> ExitCode {
     use std::os::unix::process::CommandExt;
     let err = match std::env::current_exe() {
@@ -722,8 +756,7 @@ pub fn main() -> ExitCode {
     }
     let cmdline: Vec<String> = std::env::args().skip(1).collect();
     let stop = Arc::new(AtomicBool::new(false));
-    let sigs = [libc::SIGINT, libc::SIGTERM, libc::SIGHUP, libc::SIGQUIT];
-    let signaled = match signals::trap(&sigs, stop.clone(), || {
+    let signaled = match signals::trap(&signals::STOP, stop.clone(), || {
         crate::ptt::wait_released(SECOND_SIGNAL_GRACE);
     }) {
         Ok(s) => s,
@@ -1037,6 +1070,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
     fn state_dir_is_created_private_and_a_shared_one_warned_about() {
         use std::os::unix::fs::PermissionsExt;
         let top = scratch("state");

@@ -230,8 +230,26 @@ fn serve(
 
 pub fn new_token() -> io::Result<String> {
     let mut b = [0u8; 16];
-    std::fs::File::open("/dev/urandom")?.read_exact(&mut b)?;
+    random_bytes(&mut b)?;
     Ok(b.iter().map(|x| format!("{x:02x}")).collect())
+}
+
+#[cfg(unix)]
+fn random_bytes(b: &mut [u8]) -> io::Result<()> {
+    std::fs::File::open("/dev/urandom")?.read_exact(b)
+}
+
+#[cfg(windows)]
+fn random_bytes(b: &mut [u8]) -> io::Result<()> {
+    use windows_sys::Win32::Security::Cryptography::{BCRYPT_USE_SYSTEM_PREFERRED_RNG, BCryptGenRandom};
+    // SAFETY: b is valid for b.len() bytes of writes.
+    let r = unsafe {
+        BCryptGenRandom(std::ptr::null_mut(), b.as_mut_ptr(), b.len() as u32, BCRYPT_USE_SYSTEM_PREFERRED_RNG)
+    };
+    if r != 0 {
+        return Err(io::Error::other(format!("BCryptGenRandom: {r:#x}")));
+    }
+    Ok(())
 }
 
 pub fn valid_token(t: &str) -> bool {
@@ -239,12 +257,15 @@ pub fn valid_token(t: &str) -> bool {
 }
 
 pub fn stored_token(dir: &Path) -> io::Result<String> {
-    use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
     let path = dir.join(TOKEN_FILE);
     match std::fs::read_to_string(&path) {
         Ok(t) if valid_token(t.trim()) => {
-            if std::fs::metadata(&path)?.permissions().mode() & 0o077 != 0 {
-                std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))?;
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                if std::fs::metadata(&path)?.permissions().mode() & 0o077 != 0 {
+                    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))?;
+                }
             }
             return Ok(t.trim().to_string());
         }
@@ -257,7 +278,7 @@ pub fn stored_token(dir: &Path) -> io::Result<String> {
         Err(e) if e.kind() != io::ErrorKind::NotFound => return Err(e),
         _ => {}
     }
-    let mut f = std::fs::OpenOptions::new().write(true).create_new(true).mode(0o600).open(&tmp)?;
+    let mut f = crate::new_file(&tmp, 0o600)?;
     writeln!(f, "{t}")?;
     f.sync_all()?;
     std::fs::rename(&tmp, &path)?;

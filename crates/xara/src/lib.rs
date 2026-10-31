@@ -16,6 +16,8 @@ pub mod station;
 pub mod tnc;
 pub mod trusdx;
 pub mod wav;
+#[cfg(windows)]
+pub mod winserial;
 
 pub const DEFAULT_ADDR: &str = "127.0.0.1";
 pub const HF_SPAN_HZ: u32 = 3000;
