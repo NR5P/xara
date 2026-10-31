@@ -24,6 +24,7 @@ to transmit, add `--radio` and `--ptt` flags.
  - iOS app: the same modem on an iPhone or iPad, see [iOS](#ios)
  - Android app: the same modem on an Android phone or tablet, see [Android](#android)
  - Windows app: the same modem with a window and a tray icon, see [Windows](#windows)
+ - Linux app: the same modem with a window and its live link status, see [Linux app](#linux-app)
 
 ## building
 
@@ -39,6 +40,16 @@ alternatively for a local setup you can do:
 
     cargo build --release
     cargo test
+
+### Linux app
+
+for a window instead of the command line, `linux/` has a Linux app with the
+same modem and settings as the Windows and Mac apps (including *Registered
+(VARA licence)*), the link's live status (state, speed level, bitrate, S/N,
+levels) and an entry in your applications menu; see
+[linux/README.md](linux/README.md):
+
+    cargo build --release --manifest-path linux/Cargo.toml
 
 ### macOS
 

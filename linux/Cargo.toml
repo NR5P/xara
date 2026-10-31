@@ -1,0 +1,29 @@
+# The Linux app: the same Rust modem as the `xara` command, linked in through
+# crates/xara-ffi as the Windows, Mac, iOS and Android apps do, with a window.
+[package]
+name = "xara-linux"
+version = "0.1.1"
+edition = "2024"
+rust-version = "1.85"
+publish = false
+license = "MIT"
+description = "xara for Linux: the VARA-compatible modem with a window"
+
+# Not part of the root workspace: this folder builds on its own, into its own target/.
+[workspace]
+
+[[bin]]
+name = "xara-app"
+path = "src/main.rs"
+
+[dependencies]
+# Registered VARA speeds are built in but used only when the user says they hold a VARA licence.
+xara-ffi = { path = "../crates/xara-ffi", features = ["registered"] }
+xara = { path = "../crates/xara" }
+eframe = "0.30"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+open = "5"
+
+[profile.release]
+strip = true
