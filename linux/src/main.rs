@@ -470,6 +470,38 @@ impl App {
         });
         meter(ui, "RX", st.rx_rms);
         meter(ui, "TX", st.tx_rms);
+        // Tune: a steady carrier to set the radio's ALC, with the TX drive live
+        ui.add_space(4.0);
+        ui.horizontal(|ui| {
+            let (label, fill) = if st.tuning {
+                (format!("STOP TUNE ({:.0} s)", st.tune_left.max(0.0)), Color32::from_rgb(200, 50, 50))
+            } else {
+                ("TUNE".to_string(), Color32::from_rgb(31, 111, 235))
+            };
+            let b = egui::Button::new(RichText::new(label).strong().color(Color32::WHITE)).fill(fill).min_size(egui::vec2(130.0, 26.0));
+            if ui.add(b).on_hover_text("A steady carrier for at most 20 s, to set the radio's ALC and power").clicked() {
+                xara_ffi::tune(!st.tuning);
+            }
+            ui.label("TX drive");
+            let mut s = self.settings.lock().unwrap_or_else(PoisonError::into_inner);
+            let mut db = st.drive.map_or(s.drive_db, |d| d as f32);
+            if ui.add(egui::Slider::new(&mut db, -30.0..=0.0).step_by(1.0).suffix(" dB")).changed() {
+                xara_ffi::set_drive(f64::from(db));
+                // (kept for the next start too)
+                s.drive_db = db;
+                let _ = s.save();
+            }
+        });
+        let radio = self.settings.lock().unwrap_or_else(PoisonError::into_inner).radio;
+        note(
+            ui,
+            if radio {
+                "Tune keys the transmitter: use a clear frequency (not a calling frequency) or a dummy load. \
+                 For digital modes turn the drive down until the ALC barely moves."
+            } else {
+                "Without radio mode the tune carrier only goes into the virtual device."
+            },
+        );
         ui.add_space(4.0);
     }
 

@@ -33,6 +33,16 @@ bool xara_running(const XaraModem *modem);
 // returns the exit status: 0 for a clean stop, 2 for bad options, else 1.
 uint8_t xara_stop(XaraModem *modem);
 
+// Starts (true) or stops (false) a tune carrier at the current TX drive, as
+// the web UI's Tune button does: it keys the transmitter for at most 20 s.
+// The modem's status ("tuning", "tune_left" in the web UI) shows it running.
+// Returns false when the modem isn't running.
+bool xara_tune(bool on);
+
+// Sets the TX drive in dB (-30 to 0) while the modem runs, e.g. while tuning
+// to set the radio's ALC. Returns false when the modem isn't running.
+bool xara_set_drive(double db);
+
 // Copies the next line xara logged into buf (NUL-terminated, cut to fit).
 // Returns false when no line is waiting. Lines are also kept on stderr.
 bool xara_next_log(char *buf, size_t cap);

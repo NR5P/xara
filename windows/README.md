@@ -4,7 +4,11 @@ a Windows app for the xara modem: the same Rust modem as the `xara` command,
 linked in through `crates/xara-ffi` as the Mac, iOS and Android apps do, with
 a window and a tray icon.
 
- - **Modem**: call sign, mode, TX drive, audio in/out (any WASAPI device),
+ - **Modem**: while it runs, the link's live status (state, the station
+   you're linked with, speed level, bitrate, S/N, AFC, bandwidth, modulation,
+   attempts, buffer, PTT / BUSY / CLIP and the RX/TX levels) and **TUNE**: a
+   steady carrier for at most 20 s with the TX drive adjustable live, to set
+   the radio's ALC; then the settings: call sign, mode, TX drive, audio in/out (any WASAPI device),
    radio mode and PTT (VOX, serial RTS/DTR on a COM port, rigctld), PTT lead
    and tail, audio delay, ports, LAN access, start with Windows
  - **Web UI**: opens xara's own web UI (waterfall, levels, status) in your

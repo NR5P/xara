@@ -42,3 +42,10 @@ start asks for microphone access; that is how xara hears the radio.
 
 without radio mode xara only plays into a virtual audio device (e.g.
 BlackHole), as the command does without `--radio`.
+
+## not done yet
+
+ - a TUNE button (and a live TX drive) next to Start / Stop, as the Linux and
+   Windows apps have (the web UI in the window already has Tune when *web UI
+   can control the radio* is on): call `xara_tune(true / false)` and
+   `xara_set_drive(db)` from `crates/xara-ffi/include/xara.h`

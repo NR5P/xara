@@ -6,7 +6,9 @@ do, with a window.
 
  - **Modem**: the link's live status at the top while it runs (state, the
    station you're linked with, speed level, bitrate, S/N, AFC, bandwidth,
-   modulation, attempts, buffer, PTT / BUSY / CLIP and the RX/TX levels), then
+   modulation, attempts, buffer, PTT / BUSY / CLIP and the RX/TX levels) and
+   **TUNE**: a steady carrier for at most 20 s with the TX drive adjustable
+   live, to set the radio's ALC (use a clear frequency or a dummy load), then
    the settings: call sign, mode, TX drive, *Registered (VARA licence)*, audio
    in/out (any PulseAudio / PipeWire device), radio mode and PTT (VOX, serial
    RTS/DTR, CM108/CM119 GPIO, rigctld), PTT lead and tail, audio delay, ports,

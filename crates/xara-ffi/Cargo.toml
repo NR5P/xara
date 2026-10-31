@@ -19,3 +19,4 @@ registered = ["xara/registered"]
 [dependencies]
 xara = { path = "../xara", default-features = false }
 xara-host.workspace = true
+xara-ui.workspace = true

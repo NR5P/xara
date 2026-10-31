@@ -48,3 +48,6 @@ afterwards; a route change to the phone's speaker stops it.
 
  - no app icon
  - tested in the simulator; not yet on a device with a radio attached
+ - a TUNE button (and a live TX drive) in the modem settings, as the Linux and
+   Windows apps have: call `xara_tune(true / false)` and `xara_set_drive(db)`
+   from `include/xara.h`

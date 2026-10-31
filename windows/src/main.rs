@@ -8,6 +8,7 @@
 
 mod icon;
 mod settings;
+mod status;
 mod win;
 
 use std::collections::VecDeque;
@@ -17,6 +18,7 @@ use std::time::Duration;
 
 use eframe::egui::{self, Color32, RichText};
 use settings::{MODES, PTTS, Settings};
+use status::Latest;
 
 const LOG_LINES: usize = 5000;
 const RECEIVED_LIMIT: usize = 500_000;
@@ -51,6 +53,7 @@ impl Modem {
             self.status = format!("Port {} is already in use (is VARA or another modem running?)", s.port);
             return;
         }
+        status::PORT.store(s.ui_port, Ordering::Relaxed);
         let args = s.arguments();
         match xara_ffi::start(args) {
             Some(m) => {
@@ -123,6 +126,7 @@ struct App {
     _tray: Option<tray_icon::TrayIcon>,
     tray_on: Option<bool>,
     hwnd_known: bool,
+    status: Latest,
 }
 
 /// Set by the tray's Quit: the window lets itself close.
@@ -138,6 +142,11 @@ impl App {
             received: String::new(),
         }));
         let tray = win::tray(cc.egui_ctx.clone(), modem.clone(), settings.clone());
+        let status: Latest = Arc::new(Mutex::new(None));
+        {
+            let ctx = cc.egui_ctx.clone();
+            status::spawn(status.clone(), move || ctx.request_repaint());
+        }
         let mut app = Self {
             modem,
             settings,
@@ -149,10 +158,12 @@ impl App {
             _tray: tray,
             tray_on: None,
             hwnd_known: false,
+            status,
         };
         app.refresh_devices();
         app.pick_default_devices();
         let s = app.settings.lock().unwrap_or_else(PoisonError::into_inner).clone();
+        status::PORT.store(s.ui_port, Ordering::Relaxed);
         if start || s.auto_start {
             lock(&app.modem).start(&s);
         }
@@ -235,6 +246,7 @@ impl App {
                     });
                 });
                 if running {
+                    self.status_panel(ui);
                     ui.label(
                         RichText::new(format!(
                             "VARA command {}, data {}, KISS {}, web UI {}",
@@ -412,11 +424,86 @@ impl App {
         });
 
         if s != before {
+            status::PORT.store(s.ui_port, Ordering::Relaxed);
             if let Err(e) = s.save() {
                 lock(&self.modem).status = format!("Couldn't save settings: {e}");
             }
             *self.settings.lock().unwrap_or_else(PoisonError::into_inner) = s;
         }
+    }
+
+    /// The link as the web UI shows it: state, peer, speed level, bitrate, S/N, levels.
+    fn status_panel(&self, ui: &mut egui::Ui) {
+        let latest = self.status.lock().unwrap_or_else(PoisonError::into_inner).clone();
+        let Some((_, st)) = latest.filter(|(t, _)| t.elapsed() < Duration::from_secs(5)) else {
+            ui.label(RichText::new("Waiting for the modem's status…").weak());
+            return;
+        };
+        ui.add_space(6.0);
+        ui.horizontal(|ui| {
+            let state = if st.state.is_empty() { "Idle" } else { st.state.as_str() };
+            ui.label(RichText::new(state).size(18.0).strong());
+            if !st.peer.is_empty() {
+                ui.label(RichText::new(format!("with {}", st.peer)).size(16.0));
+            }
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                badge(ui, "CLIP", st.clip, Color32::from_rgb(220, 50, 50));
+                badge(ui, "BUSY", st.busy, Color32::from_rgb(230, 170, 30));
+                badge(ui, "PTT", st.ptt, Color32::from_rgb(220, 50, 50));
+            });
+        });
+        egui::Grid::new("status").num_columns(4).spacing([24.0, 4.0]).show(ui, |ui| {
+            let dash = || "–".to_string();
+            stat(ui, "Speed level", st.level.map_or_else(dash, |l| l.to_string()));
+            stat(
+                ui,
+                "Bitrate",
+                st.bps.map_or_else(dash, |b| format!("{b} bps {}", if st.tx { "↑ TX" } else { "↓ RX" })),
+            );
+            stat(ui, "S/N", st.sn.map_or_else(dash, |v| format!("{v:+.1} dB")));
+            stat(ui, "AFC", st.afc.map_or_else(dash, |v| format!("{v:+.1} Hz")));
+            ui.end_row();
+            stat(ui, "Bandwidth", if st.bw.is_empty() { dash() } else { format!("{} Hz", st.bw) });
+            stat(ui, "Modulation", if st.modulation.is_empty() { dash() } else { st.modulation.clone() });
+            stat(ui, "Attempts", st.attempts.to_string());
+            stat(ui, "Buffer", format!("{} bytes", st.buffer));
+            ui.end_row();
+        });
+        meter(ui, "RX", st.rx_rms);
+        meter(ui, "TX", st.tx_rms);
+        // Tune: a steady carrier to set the radio's ALC, with the TX drive live
+        ui.add_space(4.0);
+        ui.horizontal(|ui| {
+            let (label, fill) = if st.tuning {
+                (format!("STOP TUNE ({:.0} s)", st.tune_left.max(0.0)), Color32::from_rgb(200, 50, 50))
+            } else {
+                ("TUNE".to_string(), Color32::from_rgb(31, 111, 235))
+            };
+            let b = egui::Button::new(RichText::new(label).strong().color(Color32::WHITE)).fill(fill).min_size(egui::vec2(130.0, 26.0));
+            if ui.add(b).on_hover_text("A steady carrier for at most 20 s, to set the radio's ALC and power").clicked() {
+                xara_ffi::tune(!st.tuning);
+            }
+            ui.label("TX drive");
+            let mut s = self.settings.lock().unwrap_or_else(PoisonError::into_inner);
+            let mut db = st.drive.map_or(s.drive_db, |d| d as f32);
+            if ui.add(egui::Slider::new(&mut db, -30.0..=0.0).step_by(1.0).suffix(" dB")).changed() {
+                xara_ffi::set_drive(f64::from(db));
+                // (kept for the next start too)
+                s.drive_db = db;
+                let _ = s.save();
+            }
+        });
+        let radio = self.settings.lock().unwrap_or_else(PoisonError::into_inner).radio;
+        note(
+            ui,
+            if radio {
+                "Tune keys the transmitter: use a clear frequency (not a calling frequency) or a dummy load. \
+                 For digital modes turn the drive down until the ALC barely moves."
+            } else {
+                "Without radio mode the tune carrier only goes into the virtual device."
+            },
+        );
+        ui.add_space(4.0);
     }
 
     fn web_tab(&mut self, ui: &mut egui::Ui) {
@@ -471,6 +558,32 @@ impl App {
             }
         });
     }
+}
+
+/// A status pill: lit in `color` when on.
+fn badge(ui: &mut egui::Ui, text: &str, on: bool, color: Color32) {
+    let (fg, bg) = if on { (Color32::WHITE, color) } else { (Color32::GRAY, Color32::TRANSPARENT) };
+    egui::Frame::none().fill(bg).stroke(egui::Stroke::new(1.0_f32, if on { color } else { Color32::GRAY }))
+        .rounding(4.0).inner_margin(egui::Margin::symmetric(6.0, 1.0))
+        .show(ui, |ui| ui.label(RichText::new(text).color(fg).strong().size(12.0)));
+}
+
+/// A caption over a value, one cell of the status grid.
+fn stat(ui: &mut egui::Ui, caption: &str, value: String) {
+    ui.vertical(|ui| {
+        ui.label(RichText::new(caption).weak().size(11.0));
+        ui.label(RichText::new(value).size(15.0).monospace());
+    });
+}
+
+/// An audio level bar, -60…0 dBFS.
+fn meter(ui: &mut egui::Ui, label: &str, dbfs: f64) {
+    ui.horizontal(|ui| {
+        ui.label(RichText::new(label).monospace());
+        let frac = ((dbfs + 60.0) / 60.0).clamp(0.0, 1.0) as f32;
+        let text = if dbfs <= -119.0 { "–".to_string() } else { format!("{dbfs:.1} dBFS") };
+        ui.add(egui::ProgressBar::new(frac).desired_width(ui.available_width().min(420.0)).text(text));
+    });
 }
 
 fn xara_ffi_version() -> &'static str {

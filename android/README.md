@@ -66,3 +66,7 @@ service with a notification keeps the modem running in the background.
  - USB serial (CDC) and CM108 PTT, which Android would allow through its USB
    host API
  - tested in the emulator; not yet on a phone with a radio attached
+ - a TUNE button (and a live TX drive) in the Modem screen, as the Linux and
+   Windows apps have: the native side is there (`Native.tune(on)`,
+   `Native.setDrive(db)`); the screen needs the button, and the status (the
+   web UI's `tuning` / `tune_left`) to show the carrier is on

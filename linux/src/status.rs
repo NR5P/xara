@@ -28,6 +28,11 @@ pub struct Status {
     pub rx_rms: f64,
     pub tx_rms: f64,
     pub clip: bool,
+    /// A tune carrier is on, for `tune_left` more seconds
+    pub tuning: bool,
+    pub tune_left: f64,
+    /// The TX drive the modem uses now (dB)
+    pub drive: Option<f64>,
 }
 
 impl Status {
@@ -59,6 +64,9 @@ impl Status {
             rx_rms: meter("rx", "rms").unwrap_or(-120.0),
             tx_rms: meter("tx", "rms").unwrap_or(-120.0),
             clip: meter("rx", "clip").is_some_and(|c| c > 0.0),
+            tuning: b("tuning"),
+            tune_left: n("tune_left").unwrap_or(0.0),
+            drive: n("drive"),
         })
     }
 }
@@ -182,7 +190,8 @@ mod tests {
         assert_eq!((s.state.as_str(), s.peer.as_str(), s.bw.as_str()), ("Receiving", "N1CALL", "2300"));
         assert_eq!((s.level, s.bps, s.sn, s.afc), (Some(7), Some(2412), Some(11.25), None));
         assert_eq!(s.modulation, "OFDM 49 carriers · QPSK");
-        assert!(s.ptt && !s.busy && !s.clip);
+        assert!(s.ptt && !s.busy && !s.clip && !s.tuning);
+        assert_eq!(s.drive, Some(0.0));
         assert!(Status::parse(r#"{"t":"notice","ts":0,"kind":"timed_out"}"#).is_none());
     }
 

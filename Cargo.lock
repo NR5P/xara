@@ -314,6 +314,7 @@ version = "0.1.1"
 dependencies = [
  "xara",
  "xara-host",
+ "xara-ui",
 ]
 
 [[package]]

@@ -18,7 +18,7 @@ use xara_phy::hf::level::{Bandwidth, Record};
 use xara_ui::messages::Info;
 use xara_ui::server::{Access, UiServer, new_token, stored_token, valid_token};
 use xara_ui::settings::{self, Device, Devices, Entry, Init, Pairs, Settings};
-use xara_ui::telemetry::{self, EVENT_QUEUE};
+use xara_ui::telemetry::{self, Control, Controller, EVENT_QUEUE};
 
 const USAGE: Usage = Usage {
     name: "xara",
@@ -568,6 +568,7 @@ fn serve<M: Modem>(
     let _ui = match a.ui.port {
         Some(p) => {
             let (t, feed) = telemetry::channel(EVENT_QUEUE);
+            *APP_CONTROLS.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(feed.controller());
             let (mode, span_hz) = if a.fm.is_some() { ("fm", crate::FM_SPAN_HZ) } else { ("hf", crate::HF_SPAN_HZ) };
             let info = Info { version: env!("CARGO_PKG_VERSION"), mode, span_hz };
             let token = a.ui_token.clone();
@@ -782,6 +783,23 @@ pub fn main() -> ExitCode {
 /// Runs xara inside another program (such as an iOS app) until `stop` is set, restarting in
 /// place when the web UI asks. Signals are left to the host program. Returns the exit status
 /// the command would have had.
+/// The running modem's control queue (the one the web UI's Tune and drive use), for the app
+/// embedding it. Set while a modem with a web UI runs.
+static APP_CONTROLS: std::sync::Mutex<Option<Controller>> = std::sync::Mutex::new(None);
+
+/// The embedding app's client id in the control queue (web pages count up from 1).
+const APP_CLIENT: u64 = u64::MAX;
+
+/// Send a control from the app embedding xara: Tune(true / false), Drive(dB), Abort.
+/// False when no modem with a web UI is running (the apps always start one).
+pub fn app_control(c: Control) -> bool {
+    APP_CONTROLS
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .as_ref()
+        .is_some_and(|k| k.send(APP_CLIENT, c))
+}
+
 pub fn run_embedded(cmdline: &[String], stop: &Arc<AtomicBool>) -> u8 {
     let (mut token, mut part) = (None, 0);
     loop {

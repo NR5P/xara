@@ -88,6 +88,18 @@ pub extern "C" fn Java_io_github_x0rro_xara_Native_stop(_: Env, _: JObject, hand
     i32::from(unsafe { Box::from_raw(handle as *mut XaraModem) }.stop())
 }
 
+/// Tune carrier on (1) or off (0); 1 when the modem took it.
+#[unsafe(no_mangle)]
+pub extern "C" fn Java_io_github_x0rro_xara_Native_tune(_: Env, _: JObject, on: u8) -> u8 {
+    crate::tune(on != 0).into()
+}
+
+/// TX drive in dB (-30…0) while running; 1 when the modem took it.
+#[unsafe(no_mangle)]
+pub extern "C" fn Java_io_github_x0rro_xara_Native_setDrive(_: Env, _: JObject, db: f64) -> u8 {
+    crate::set_drive(db).into()
+}
+
 /// The next piece of received data as text, or null.
 #[unsafe(no_mangle)]
 pub extern "C" fn Java_io_github_x0rro_xara_Native_nextReceived(env: Env, _: JObject) -> JObject {

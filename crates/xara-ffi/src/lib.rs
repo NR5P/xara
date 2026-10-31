@@ -126,6 +126,27 @@ pub unsafe extern "C" fn xara_stop(modem: *mut XaraModem) -> u8 {
     unsafe { Box::from_raw(modem) }.stop()
 }
 
+/// Start or stop a tune carrier (at the current TX drive, for at most 20 s, as the web UI's
+/// Tune does). False when the modem isn't running.
+pub fn tune(on: bool) -> bool {
+    xara::daemon::app_control(xara_ui::telemetry::Control::Tune(on))
+}
+
+/// Set the TX drive (dB, -30…0) while the modem runs, e.g. while tuning for ALC.
+pub fn set_drive(db: f64) -> bool {
+    xara::daemon::app_control(xara_ui::telemetry::Control::Drive(db))
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn xara_tune(on: bool) -> bool {
+    tune(on)
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn xara_set_drive(db: f64) -> bool {
+    set_drive(db)
+}
+
 pub fn next_log() -> Option<String> {
     LOG.lock().unwrap_or_else(PoisonError::into_inner).pop_front()
 }

@@ -17,6 +17,13 @@ object Native {
     /** Stops the modem, releasing PTT first, and frees the handle. Returns the exit status. */
     external fun stop(handle: Long): Int
 
+    /** Tune carrier on/off (at most 20 s, as the web UI's Tune); false when not running.
+     *  TODO(app): a TUNE button in the Modem screen, as the Linux and Windows apps have. */
+    external fun tune(on: Boolean): Boolean
+
+    /** TX drive in dB (-30..0) while running, e.g. while tuning for ALC; false when not running. */
+    external fun setDrive(db: Double): Boolean
+
     /** The next line xara logged, or null. */
     external fun nextLog(): String?
 
