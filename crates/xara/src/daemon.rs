@@ -509,8 +509,13 @@ fn run(
     stop: &Arc<AtomicBool>,
     rec: Option<&mut Recorder>,
 ) -> std::io::Result<Outcome> {
-    // The PTT lead is silence xara inserts and then allows for; the audio latency is only allowed for.
-    let latency = a.audio_latency.as_millis() as usize * (audio::RATE / 1000) as usize;
+    // The PTT lead is silence xara inserts and then allows for; the audio latency is only allowed for,
+    // the user's and what the audio backend adds itself (its queues and device buffers).
+    let backend = io.latency();
+    if backend > 0 {
+        say!("audio path adds {} ms (allowed for)", backend * 1000 / audio::RATE as usize);
+    }
+    let latency = a.audio_latency.as_millis() as usize * (audio::RATE / 1000) as usize + backend;
     let opts = Options { drive_db: a.drive_db, tx_latency: (lead_samples(a) + latency) as i64 };
     let host = Host::bind(&a.addr, a.port)?;
     let mode = match a.fm {

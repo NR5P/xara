@@ -46,6 +46,13 @@ fn remaining(until: std::time::Instant, what: &str) -> io::Result<Duration> {
 pub trait Audio {
     fn read(&mut self, x: &mut [i16]) -> io::Result<()>;
     fn write(&mut self, x: &[i16]) -> io::Result<()>;
+
+    /// Delay the backend itself adds to the audio path, round trip, in samples: queues and
+    /// device buffers between the modem and the sound card. The modem allows for it as it
+    /// does for --audio-latency-ms. Backends that read and write the device directly add none.
+    fn latency(&self) -> usize {
+        0
+    }
 }
 
 pub fn sample(v: i16) -> f64 {
