@@ -2,6 +2,14 @@
 
 ## unreleased
 
+- BUSY no longer trips on plain noise when the radio's passband slopes: the
+  tone detector learns the receiver's noise shape while the channel is clear
+  and divides it out, so a strong bin on the loud side of the passband stops
+  looking like a carrier. On an FTDX3000 on 14.105 MHz this took false BUSYs
+  from every few seconds to almost none, and real beacons still trip it
+- Windows audio: less delay through WASAPI, and the rest, including a virtual
+  cable's own, allowed for so PTT holds until the audio has played
+
 - (tr)uSDX audio over CAT: `--audio trusdx` and `--ptt trusdx` carry the
   radio's audio and PTT on its USB serial port, on the command line and in
   the Android app (*Connection: (tr)uSDX*), with no sound card. ported from

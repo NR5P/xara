@@ -91,6 +91,47 @@ fn silence_and_noise_rarely_trip() {
     }
 }
 
+/// Gaussian noise whose level climbs `db_per_100hz` above 1000 Hz (flat below), as a radio's
+/// passband or a noisy band edge gives it: shaped in the frequency domain, n samples (a power
+/// of two).
+fn sloped_noise(r: &mut Rng, n: usize, rms: f64, db_per_100hz: f64) -> Vec<f64> {
+    use num_complex::Complex64;
+    let mut spec: Vec<Complex64> = (0..n)
+        .map(|k| {
+            let hz = 48000.0 * k.min(n - k) as f64 / n as f64;
+            let gain = db(db_per_100hz * ((hz - 1000.0).max(0.0) / 100.0).min(30.0));
+            Complex64::new(r.gauss(), r.gauss()) * gain
+        })
+        .collect();
+    rustfft::FftPlanner::new().plan_fft_inverse(n).process(&mut spec);
+    let x: Vec<f64> = spec.iter().map(|c| c.re).collect();
+    let now = (x.iter().map(|v| v * v).sum::<f64>() / n as f64).sqrt();
+    x.iter().map(|v| v * rms / now).collect()
+}
+
+#[test]
+fn sloped_noise_is_not_a_carrier() {
+    // A radio whose noise climbs ~11 dB across the 500 Hz passband (measured on an FTDX3000's
+    // USB audio, 2.3 dB per 100 Hz): comparing the strongest bin with the quietest made plain
+    // noise look like a tone every few seconds. Once the noise shape is learned it doesn't, and
+    // a real carrier on top of it still trips.
+    let mut r = Rng::new(21);
+    let mut b = Busy::new(Bandwidth::Hz500);
+    let warm = sloped_noise(&mut r, 1 << 18, db(-35.0), 2.3);
+    run(&mut b, &warm);
+    let before = b.hits[0];
+    let quiet = sloped_noise(&mut r, 1 << 19, db(-35.0), 2.3);
+    run(&mut b, &quiet);
+    assert_eq!(b.hits[0], before, "noise alone tripped the tone detector {:?}", b.hits);
+    let carrier: Vec<f64> = sloped_noise(&mut r, 1 << 16, db(-35.0), 2.3)
+        .iter()
+        .zip(tone(1 << 16, 1400.0, db(-25.0)))
+        .map(|(a, b)| a + b)
+        .collect();
+    run(&mut b, &carrier);
+    assert!(b.hits[0] > before, "the carrier went unseen {:?}", b.hits);
+}
+
 #[test]
 fn tone_in_noise_hangs_34_blocks() {
     let mut b = Busy::new(Bandwidth::Hz2300);

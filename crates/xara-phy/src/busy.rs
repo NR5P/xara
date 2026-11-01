@@ -9,6 +9,13 @@ pub const HANG: u32 = 34;
 pub const TONE_PEAK_RATIO: f64 = 270.0;
 pub const VU_GATE_DBFS: f64 = -46.0;
 pub const SIGNATURE_POWER_GATE: f64 = 1e6;
+/// Blocks of clear channel the tone detector learns the noise shape from before using it
+/// (64 blocks of 128 at 3 kHz, 2.7 s); and how slowly that shape follows the band.
+pub const SHAPE_WARMUP: u32 = 64;
+const SHAPE_ALPHA: f64 = 1.0 / 64.0;
+/// Each bin's noise is taken as the median of this many bins around it, so a slope or hump
+/// in the radio's passband is learned but a carrier, a bin or two wide, is not.
+const SHAPE_SPAN: usize = 7;
 const ROWS: usize = 20;
 const FULL_SCALE: f64 = 32767.0;
 
@@ -92,6 +99,22 @@ pub fn detect_tone(power: &[f64], bw: Bandwidth) -> bool {
     v[v.len() - 1] > TONE_PEAK_RATIO * v[rank - 1]
 }
 
+/// The power spectrum of a block with the receiver's noise shape divided out over the tone
+/// band: a passband that slopes or dips no longer looks like a carrier to detect_tone, which
+/// compares the strongest bin with the quietest. `log_shape` is the noise's mean ln(power) per
+/// bin; each bin is divided by the median of the SHAPE_SPAN bins around it.
+pub fn whiten(power: &[f64; 128], log_shape: &[f64; 128], bw: Bandwidth) -> [f64; 128] {
+    let (lo, hi, _) = tone_band(bw);
+    let half = SHAPE_SPAN / 2;
+    let mut out = *power;
+    for k in lo..=hi {
+        let mut near: Vec<f64> = (k.saturating_sub(half)..=(k + half).min(127)).map(|j| log_shape[j]).collect();
+        near.sort_by(f64::total_cmp);
+        out[k] = power[k] * (-near[near.len() / 2]).exp();
+    }
+    out
+}
+
 pub fn detect_signature(power: &[f64], sig: &Signature, threshold: f64) -> bool {
     let at = |b: usize, sh: i64| power[(b as i64 + sh) as usize];
     let (mut best, mut shift) = (0.0, 0);
@@ -120,6 +143,10 @@ pub struct Busy {
     vu: f64,
     hang: u32,
     on: bool,
+    /// The receiver's noise per tone-FFT bin as mean ln(power), learned while the channel is
+    /// clear (in the log, so the first loud block of a signal, before BUSY trips, barely moves it)
+    shape: [f64; 128],
+    shape_blocks: u32,
     pub hits: [u32; 2],
 }
 
@@ -144,6 +171,8 @@ impl Busy {
             vu: -200.0,
             hang: 0,
             on: false,
+            shape: [0.0; 128],
+            shape_blocks: 0,
             hits: [0; 2],
         }
     }
@@ -221,7 +250,20 @@ impl Busy {
         }
         self.fft128.process(&mut self.block);
         let p: [f64; 128] = std::array::from_fn(|k| self.block[k].norm_sqr());
-        detect_tone(&p, self.bw)
+        let hit = if self.shape_blocks >= SHAPE_WARMUP {
+            detect_tone(&whiten(&p, &self.shape, self.bw), self.bw)
+        } else {
+            detect_tone(&p, self.bw)
+        };
+        // Learn the noise shape only from a clear channel, so a signal can't teach it
+        if !hit && !self.on {
+            let a = if self.shape_blocks == 0 { 1.0 } else { SHAPE_ALPHA.max(1.0 / f64::from(self.shape_blocks + 1)) };
+            for (s, v) in self.shape.iter_mut().zip(p) {
+                *s += a * (v.max(1e-30).ln() - *s);
+            }
+            self.shape_blocks = self.shape_blocks.saturating_add(1);
+        }
+        hit
     }
 
     fn signature_hit(&mut self) -> bool {
