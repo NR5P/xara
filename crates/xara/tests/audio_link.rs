@@ -194,13 +194,21 @@ fn ssid_calls_link_over_audio() {
             |r| matches!(r, Report::Host(HostEvent::Buffer(_) | HostEvent::Sn(_))),
         );
         air.st[0].connect(a, b, &[]);
-        let line = Report::Host(HostEvent::Connected { caller: a.into(), answerer: b.into(), vias: Vec::new(), bw: Bandwidth::Hz2300.into() });
+        let line = Report::Host(HostEvent::Connected {
+            caller: a.into(),
+            answerer: b.into(),
+            vias: Vec::new(),
+            bw: Bandwidth::Hz2300.into(),
+        });
         assert!(air.run_until(40.0, |x| x.has(0, &line) && x.has(1, &line)), "{a} -> {b}:\n{}", air.trace());
         let (pa, pb) = (payload(300, 77), payload(120, 78));
         air.st[0].send(&pa);
         air.st[1].send(&pb);
-        assert!(air.run_until(60.0, |x| x.got[1].len() >= pa.len() && x.got[0].len() >= pb.len()), "{a} -> {b}:\n{}", air.trace());
+        assert!(
+            air.run_until(60.0, |x| x.got[1].len() >= pa.len() && x.got[0].len() >= pb.len()),
+            "{a} -> {b}:\n{}",
+            air.trace()
+        );
         assert_eq!((&air.got[1], &air.got[0]), (&pa, &pb));
     }
 }
-

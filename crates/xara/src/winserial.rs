@@ -9,7 +9,9 @@ use windows_sys::Win32::Devices::Communication::{
     SetCommState, SetCommTimeouts,
 };
 use windows_sys::Win32::Foundation::{ERROR_NO_MORE_ITEMS, ERROR_SUCCESS};
-use windows_sys::Win32::System::Registry::{HKEY, HKEY_LOCAL_MACHINE, KEY_READ, RegCloseKey, RegEnumValueW, RegOpenKeyExW};
+use windows_sys::Win32::System::Registry::{
+    HKEY, HKEY_LOCAL_MACHINE, KEY_READ, RegCloseKey, RegEnumValueW, RegOpenKeyExW,
+};
 
 /// A port name as the user writes it (`COM3`, `com12`) or a full `\\.\COM12` path.
 pub fn is_port(name: &str) -> bool {

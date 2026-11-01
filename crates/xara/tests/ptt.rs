@@ -11,7 +11,8 @@ use xara::ptt::{Cm108, Event, Ptt, PttCtl, PttSpec, PttTiming, Rigctld, Serial, 
 fn ptt_spec_parse() {
     assert_eq!(PttSpec::parse("vox"), Ok(PttSpec::Vox));
     // Serial ports are device paths on Unix and COM ports on Windows.
-    let (acm, usb, bare) = if cfg!(windows) { ("COM3", "COM12", "ttyACM0") } else { ("/dev/ttyACM0", "/dev/ttyUSB1", "ttyACM0") };
+    let (acm, usb, bare) =
+        if cfg!(windows) { ("COM3", "COM12", "ttyACM0") } else { ("/dev/ttyACM0", "/dev/ttyUSB1", "ttyACM0") };
     assert_eq!(PttSpec::parse(&format!("rts:{acm}")), Ok(PttSpec::Rts(acm.into())));
     assert_eq!(PttSpec::parse(&format!("dtr:{usb}")), Ok(PttSpec::Dtr(usb.into())));
     assert!(PttSpec::parse(&format!("rts:{bare}")).is_err());
@@ -685,8 +686,11 @@ fn is_hidraw_accepts_only_hidraw_char_devices() {
     assert!(!xara::ptt::is_hidraw("/dev/null"));
     assert!(!xara::ptt::is_hidraw("/nonexistent"));
     assert!(!xara::ptt::is_hidraw(Scratch::new("plain").path()));
-    if let Some(h) =
-        std::fs::read_dir("/dev").into_iter().flatten().flatten().find(|e| e.file_name().to_string_lossy().starts_with("hidraw"))
+    if let Some(h) = std::fs::read_dir("/dev")
+        .into_iter()
+        .flatten()
+        .flatten()
+        .find(|e| e.file_name().to_string_lossy().starts_with("hidraw"))
     {
         assert!(xara::ptt::is_hidraw(h.path().to_str().unwrap()));
     }

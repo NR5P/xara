@@ -217,8 +217,7 @@ impl Serial {
 #[cfg(windows)]
 impl Ptt for Serial {
     fn set(&mut self, on: bool) -> io::Result<()> {
-        crate::winserial::set_line(&self.f, self.line, on)
-            .map_err(|e| io::Error::other(format!("{}: {e}", self.path)))
+        crate::winserial::set_line(&self.f, self.line, on).map_err(|e| io::Error::other(format!("{}: {e}", self.path)))
     }
 
     fn describe(&self) -> String {

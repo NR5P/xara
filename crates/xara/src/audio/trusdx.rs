@@ -206,8 +206,7 @@ pub fn check(playback: &str, _radio: bool) -> io::Result<()> {
 /// Serial ports that could be a (tr)uSDX: its CH340 USB-serial chip, or any USB serial port.
 #[cfg(windows)]
 pub fn list() -> io::Result<(DeviceList, DeviceList)> {
-    let mut ports: DeviceList =
-        crate::winserial::ports().into_iter().map(|p| (p, "serial port".to_string())).collect();
+    let mut ports: DeviceList = crate::winserial::ports().into_iter().map(|p| (p, "serial port".to_string())).collect();
     ports.push((APP.into(), "a port the app embedding xara carries".into()));
     Ok((ports.clone(), ports))
 }

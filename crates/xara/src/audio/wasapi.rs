@@ -355,7 +355,9 @@ impl Stream {
             }
         })?;
         match ready_rx.recv() {
-            Ok(Ok(latency)) => Ok(Self { thread: Some(thread), latency: latency + if is_virtual { VIRTUAL_CABLE } else { 0 } }),
+            Ok(Ok(latency)) => {
+                Ok(Self { thread: Some(thread), latency: latency + if is_virtual { VIRTUAL_CABLE } else { 0 } })
+            }
             Ok(Err(e)) => {
                 let _ = thread.join();
                 Err(e)
@@ -499,8 +501,9 @@ mod tests {
         assert!(err("nothing", true).is_some_and(|e| e.contains("no playback device")));
         assert!(err("Speakers", true).is_some_and(|e| e.contains("ambiguous")));
         assert!(err("USB Audio CODEC", false).is_some_and(|e| e.contains("not a virtual audio device")));
-        assert_eq!((err("USB Audio CODEC", true), err("CABLE Input", false), err("{0.0.0.00000000}.{a}", false)), (
-            None, None, None
-        ));
+        assert_eq!(
+            (err("USB Audio CODEC", true), err("CABLE Input", false), err("{0.0.0.00000000}.{a}", false)),
+            (None, None, None)
+        );
     }
 }

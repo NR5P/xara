@@ -516,7 +516,8 @@ fn run(
     if backend > 0 {
         say!("audio path adds {} ms (allowed for)", backend * 1000 / audio::RATE as usize);
     }
-    let latency = (a.audio_latency + io.output_latency()).as_millis() as usize * (audio::RATE / 1000) as usize + backend;
+    let latency =
+        (a.audio_latency + io.output_latency()).as_millis() as usize * (audio::RATE / 1000) as usize + backend;
     let opts = Options { drive_db: a.drive_db, tx_latency: (lead_samples(a) + latency) as i64 };
     let host = Host::bind(&a.addr, a.port)?;
     let mode = match a.fm {
