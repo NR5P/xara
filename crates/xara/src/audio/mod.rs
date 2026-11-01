@@ -51,6 +51,13 @@ pub trait Audio {
     fn output_latency(&self) -> std::time::Duration {
         std::time::Duration::ZERO
     }
+
+    /// Delay the backend itself adds to the audio path, round trip, in samples: queues and
+    /// device buffers between the modem and the sound card. The modem allows for it as it
+    /// does for --audio-latency-ms. Backends that read and write the device directly add none.
+    fn latency(&self) -> usize {
+        0
+    }
 }
 
 pub fn sample(v: i16) -> f64 {

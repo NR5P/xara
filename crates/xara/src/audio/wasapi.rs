@@ -25,13 +25,18 @@ use windows::Win32::Media::Audio::{
 use windows::Win32::System::Com::{
     CLSCTX_ALL, COINIT_MULTITHREADED, CoCreateInstance, CoInitializeEx, CoTaskMemFree, STGM_READ,
 };
-use windows::Win32::System::Threading::{CreateEventW, WaitForSingleObject};
-use windows::core::HSTRING;
+use windows::Win32::System::Threading::{AvSetMmThreadCharacteristicsW, CreateEventW, WaitForSingleObject};
+use windows::core::{HSTRING, w};
 
 use super::{Audio, BLOCK, DeviceList, RATE, STALL, capture_only, remaining};
 
-/// The device buffer WASAPI is asked for, in 100 ns units: 40 ms.
+/// The device buffer WASAPI is asked for, in 100 ns units: 40 ms (playback keeps less of it
+/// queued; see `render_target`).
 const BUFFER_HNS: i64 = 400_000;
+/// A virtual cable buffers audio between its two ends, and WASAPI's stream latency doesn't
+/// include it: 25 ms per end, measured with VB-Audio's cables (two xaras over two cables
+/// linked on the first call only with 50 ms more allowed for each).
+const VIRTUAL_CABLE: usize = RATE as usize * 25 / 1000;
 const TX_TARGET: usize = 2 * BLOCK;
 const RX_LIMIT: usize = 2 * RATE as usize;
 /// How often a stream thread looks at the closed flag when its device is quiet, in ms.
@@ -181,6 +186,23 @@ pub fn check(playback: &str, radio: bool) -> io::Result<()> {
 /// One running WASAPI stream: its own thread with its own COM objects.
 struct Stream {
     thread: Option<JoinHandle<()>>,
+    /// The delay this stream adds, in samples (see `Audio::latency`).
+    latency: usize,
+}
+
+/// An initialised stream: the client, its event, its buffer and period, and the delay it adds.
+struct Client {
+    client: IAudioClient,
+    ev: Event,
+    size: u32,
+    period: u32,
+    /// The device's stream latency, in samples.
+    latency: u32,
+}
+
+/// Samples in a WASAPI duration (100 ns units).
+fn samples(hns: i64) -> u32 {
+    (hns.max(0) as u64 * u64::from(RATE) / 10_000_000) as u32
 }
 
 struct Event(HANDLE);
@@ -192,7 +214,7 @@ impl Drop for Event {
     }
 }
 
-fn open_client(id: Option<&str>, flow: EDataFlow) -> io::Result<(IAudioClient, Event, u32)> {
+fn open_client(id: Option<&str>, flow: EDataFlow) -> io::Result<Client> {
     let e = enumerator()?;
     // SAFETY: COM calls on live objects; fmt and the event outlive Initialize/SetEventHandle.
     unsafe {
@@ -216,9 +238,20 @@ fn open_client(id: Option<&str>, flow: EDataFlow) -> io::Result<(IAudioClient, E
         client.Initialize(AUDCLNT_SHAREMODE_SHARED, flags, BUFFER_HNS, 0, &fmt, None).map_err(win("audio format"))?;
         let ev = Event(CreateEventW(None, false, false, None).map_err(win("audio event"))?);
         client.SetEventHandle(ev.0).map_err(win("audio event"))?;
-        let frames = client.GetBufferSize().map_err(win("audio buffer"))?;
-        Ok((client, ev, frames))
+        let size = client.GetBufferSize().map_err(win("audio buffer"))?;
+        let mut period = 0i64;
+        client.GetDevicePeriod(Some(&mut period), None).map_err(win("audio period"))?;
+        let latency = samples(client.GetStreamLatency().map_err(win("audio latency"))?);
+        Ok(Client { client, ev, size, period: samples(period).clamp(1, size), latency })
     }
+}
+
+/// Windows' "Pro Audio" scheduling for this thread, so a busy PC doesn't hold up the
+/// audio (best effort: without it the stream still runs).
+fn pro_audio() {
+    let mut task = 0u32;
+    // SAFETY: the task name is a static wide string and task receives the index.
+    let _ = unsafe { AvSetMmThreadCharacteristicsW(w!("Pro Audio"), &mut task) };
 }
 
 fn run_capture(sh: &Shared, client: &IAudioClient, ev: &Event) -> windows::core::Result<()> {
@@ -251,19 +284,26 @@ fn run_capture(sh: &Shared, client: &IAudioClient, ev: &Event) -> windows::core:
     Ok(())
 }
 
-fn run_render(sh: &Shared, client: &IAudioClient, ev: &Event, size: u32) -> windows::core::Result<()> {
+/// Playback keeps this much queued in the device: enough to ride out a late wakeup, and no
+/// more, since everything queued is delay before a frame goes out (two device periods).
+fn render_target(c: &Client) -> u32 {
+    (2 * c.period).clamp(BLOCK as u32, c.size)
+}
+
+fn run_render(sh: &Shared, c: &Client) -> windows::core::Result<()> {
+    let (client, ev, target) = (&c.client, &c.ev, render_target(c));
     // SAFETY: the render client belongs to client; GetBuffer's space is filled and released at once.
     unsafe {
         let ren: IAudioRenderClient = client.GetService()?;
-        // Prime the buffer with silence so the device starts with something to play.
-        ren.GetBuffer(size)?;
-        ren.ReleaseBuffer(size, AUDCLNT_BUFFERFLAGS_SILENT.0 as u32)?;
+        // Prime the device with silence so it starts with something to play.
+        ren.GetBuffer(target)?;
+        ren.ReleaseBuffer(target, AUDCLNT_BUFFERFLAGS_SILENT.0 as u32)?;
         client.Start()?;
         while !sh.closed.load(Ordering::SeqCst) {
             if WaitForSingleObject(ev.0, POLL_MS) != WAIT_OBJECT_0 {
                 continue;
             }
-            let free = size - client.GetCurrentPadding()?;
+            let free = target.saturating_sub(client.GetCurrentPadding()?);
             if free == 0 {
                 continue;
             }
@@ -290,15 +330,18 @@ fn run_render(sh: &Shared, client: &IAudioClient, ev: &Event, size: u32) -> wind
 }
 
 impl Stream {
-    fn start(sh: &Arc<Shared>, id: Option<String>, input: bool, what: String) -> io::Result<Self> {
+    fn start(sh: &Arc<Shared>, id: Option<String>, input: bool, is_virtual: bool, what: String) -> io::Result<Self> {
         let (ready_tx, ready_rx) = mpsc::channel();
         let sh = sh.clone();
         let name = if input { "wasapi-capture" } else { "wasapi-render" };
         let thread = thread::Builder::new().name(name.into()).spawn(move || {
+            pro_audio();
             let flow = if input { eCapture } else { eRender };
-            let (client, ev, size) = match open_client(id.as_deref(), flow) {
+            let c = match open_client(id.as_deref(), flow) {
                 Ok(c) => {
-                    let _ = ready_tx.send(Ok(()));
+                    // Capture hands over a period at a time; playback holds its target.
+                    let queued = if input { c.period } else { render_target(&c) };
+                    let _ = ready_tx.send(Ok((c.latency + queued) as usize));
                     c
                 }
                 Err(e) => {
@@ -306,13 +349,13 @@ impl Stream {
                     return;
                 }
             };
-            let r = if input { run_capture(&sh, &client, &ev) } else { run_render(&sh, &client, &ev, size) };
+            let r = if input { run_capture(&sh, &c.client, &c.ev) } else { run_render(&sh, &c) };
             if let Err(e) = r {
                 sh.fail(format!("{what}: {e}"));
             }
         })?;
         match ready_rx.recv() {
-            Ok(Ok(())) => Ok(Self { thread: Some(thread) }),
+            Ok(Ok(latency)) => Ok(Self { thread: Some(thread), latency: latency + if is_virtual { VIRTUAL_CABLE } else { 0 } }),
             Ok(Err(e)) => {
                 let _ = thread.join();
                 Err(e)
@@ -346,14 +389,16 @@ impl WasapiIo {
         let shared = Arc::new(Shared::default());
         let mut io = Self { shared: shared.clone(), streams: Vec::new(), playing: play.is_some() };
         let rec_name = rec.as_ref().map_or("default".into(), |d| d.name.clone());
+        let rec_virtual = rec.as_ref().is_some_and(DeviceInfo::is_virtual);
         io.streams.push(
-            Stream::start(&shared, rec.map(|d| d.id), true, format!("capture {rec_name:?}"))
+            Stream::start(&shared, rec.map(|d| d.id), true, rec_virtual, format!("capture {rec_name:?}"))
                 .map_err(|e| io::Error::other(format!("capture {rec_name:?}: {e}")))?,
         );
         if let Some(d) = play {
             let what = format!("playback {:?}", d.name);
+            let virt = d.is_virtual();
             io.streams.push(
-                Stream::start(&shared, Some(d.id), false, what.clone())
+                Stream::start(&shared, Some(d.id), false, virt, what.clone())
                     .map_err(|e| io::Error::other(format!("{what}: {e}")))?,
             );
         }
@@ -373,6 +418,12 @@ impl Drop for WasapiIo {
 }
 
 impl Audio for WasapiIo {
+    /// Both streams' device latency and queues, and the playback queue `write` keeps.
+    fn latency(&self) -> usize {
+        let queue = if self.playing { TX_TARGET } else { 0 };
+        self.streams.iter().map(|s| s.latency).sum::<usize>() + queue
+    }
+
     fn read(&mut self, x: &mut [i16]) -> io::Result<()> {
         let until = Instant::now() + STALL;
         let mut st = self.shared.lock();
