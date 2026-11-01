@@ -27,10 +27,10 @@ most points are single runs.
 | Clean-channel throughput, every pair, 3 bandwidths | xara matches VARA (after the fix) |
 | SN reported for the same signal | within 0.3 dB of VARA |
 | Weak signal, down to about -8 SN | xara receives as well as or better than VARA |
-| Weak signal, about -11 SN | xara as receiver ~15-30% slower (open) |
+| Weak signal, about -11 SN | same within run-to-run variation (4 runs each); xara steps level 4 down a little sooner |
 | Weak signal, about -14 SN | all pairs within 10% |
-| First answer after a call with unaccounted audio delay | VARA tolerates ~100 ms more than xara (open) |
-| `DRIVELEVEL` | xara applies it; VARA replies OK and ignores it |
+| Link setup | 8.2-8.3 s for every pair, as VARA (after the virtual-cable allowance below) |
+| `DRIVELEVEL` | xara applies it; VARA replies OK and ignores it (kept: xara's is the useful one) |
 
 ## Fixed on this branch: delay in the Windows audio backend
 
@@ -57,38 +57,58 @@ Clean channel, net bits per second (link time in seconds), 600 B at 500 Hz, 2000
 | xara to VARA | 66.2 (10.7) | 136.6 / 137.8 (10.7) | 136.9 / 129.4 (10.7) |
 | xara to xara | 66.2 (40.5) | no link / no link* | 94.2 / no link* |
 
-\* links reliably (8.3 s) with `--audio-latency-ms 50`; see the first open gap.
+\* links reliably (8.2 s) once the cable's own delay is allowed for; see the next section.
 
-## Open gaps
+## Fixed: delay a virtual cable adds
 
-1. **First answer after a call: less tolerance of unaccounted delay than VARA.**
-   With ~50 ms of delay that Windows does not report (the virtual cable's own buffering),
-   xara as caller lets VARA's first answer go and calls again (it adapts and takes the
-   second), so it links in 10.7 s where VARA takes 8.3; two xaras often do not link.
-   VARA as caller took xara's answers even when they were ~90 ms late. With the delay set
-   (`--audio-latency-ms 50`), both cases link in 8.3 s. Any setup whose delay isn't known
-   (SDRs, network audio) would see this; a wider initial reply window when calling, as VARA
-   appears to use, would close it. The reply window is `Timing::reply_window` in
-   `crates/xara-arq/src/hf/timing.rs` (initial control delay 548 ticks + 150).
+A virtual cable buffers audio between its two ends, and WASAPI's stream latency doesn't
+include it. xara's call and reply windows are VARA's to within 10-20 ms (calling a station
+that isn't there: 1.28 s wait in Winlink mode, 1.83 s with CHAT ON, both modems), so it's
+not a narrower window: xara measures its windows from where it believes its transmission
+ended, and an unreported delay comes out of the margin. Two xaras over the cables, link
+setup in seconds over four tries, with extra `--audio-latency-ms` on each:
 
-2. **Throughput as receiver around -11 SN.**
-   Noise on the data path only (calibrated band-limited noise, 200-3200 Hz), 800 B at 2300 Hz:
+| Extra allowed for | Link times |
+|---|---|
+| 0 ms | 27.1, 17.0, 8.2, 8.2 |
+| 25 ms | 8.2, 8.2, 14.2, 8.2 |
+| 50 ms | 8.2, 8.2, 8.2, 8.2 |
 
-   | SN (VARA's scale) | VARA to VARA | VARA to xara | xara to VARA | xara to xara |
-   |---|---|---|---|---|
-   | about 0 | 110 | 125 | 126 | 127 |
-   | about -2.6 | 110 | 121 | 126 | 127 |
-   | about -5.5 | 110 | 126 | 126 | 127 |
-   | about -8.4 | 113 | 126 | 111 | 127 |
-   | about -11.3 (2 runs, mean) | 82 | 59 | 71 | 73 |
-   | about -14 | 43.5 | 42.2 | 41.3 | 38.6 |
+So the WASAPI backend now adds 25 ms for each end that is a virtual cable (VB-Audio,
+VoiceMeeter, Virtual Audio Cable, BlackHole: the names it already checks before allowing
+playback without `--radio`); a radio's sound card gets none. With no setting, every pair
+now links in 8.2-8.3 s: xara to xara 4 of 4, xara to VARA and VARA to xara 3 of 3 each
+(before: xara to VARA 10.7 s, xara to xara 8-27 s or no link).
 
-   Every transfer completed at every level. At about -11 SN VARA sends xara mostly levels
-   2-3 where VARA receiving gets mostly 3-4; whether xara's level 4 decode needs a dB or two
-   more in noise or its ACK/NACK policy steps down sooner needs more runs to tell apart.
+A setup with delay that isn't reported (an SDR, network audio) still wants
+`--audio-latency-ms` ("Audio delay" in the apps).
 
-3. **`DRIVELEVEL`**: VARA 4.9.0 answers `OK` and does not change its output; xara applies it.
-   Harmless, but a client that sends it gets different levels from the two modems.
+## Weak signal near -11 SN: no change made
+
+Noise on the data path only (calibrated band-limited noise, 200-3200 Hz), 800 B at 2300 Hz:
+
+| SN (VARA's scale) | VARA to VARA | VARA to xara | xara to VARA | xara to xara |
+|---|---|---|---|---|
+| about 0 | 110 | 125 | 126 | 127 |
+| about -2.6 | 110 | 121 | 126 | 127 |
+| about -5.5 | 110 | 126 | 126 | 127 |
+| about -8.4 | 113 | 126 | 111 | 127 |
+| about -11.3 (VV, VX: 4 runs; others 2) | 75 (89, 75, 73, 64) | 71 (74, 44, 84, 84) | 71 | 73 |
+| about -14 | 43.5 | 42.2 | 41.3 | 38.6 |
+
+Every transfer completed at every level. Decoding the ACKs each receiver sent (cable
+recording, xara-monitor) against the SN of the frame it answered: after a good level 4
+frame xara steps down at -11.3 to -11.9 SN and stays at -10.6 to -11.4 (its margin grows
+after a lost frame), where VARA stayed at the two level 4 frames it got (-11.0, -9.8); both
+stay at level 3 down to -12.1; xara climbs back to 4 more readily (5 times to VARA's 3).
+xara's decode is fine (it decoded the frames it answered DOWN to), and the net throughput is
+the same within the run-to-run spread, so the adaptation (`crates/xara-arq/src/hf/adapt.rs`,
+fitted and tested as it is) is left alone. More runs at -10 to -12 SN would show whether
+VARA really holds level 4 lower down.
+
+## Kept: `DRIVELEVEL`
+
+VARA 4.9.0 answers `OK` and does not change its output; xara applies it. Kept as it is.
 
 ## Matching (no gap found)
 

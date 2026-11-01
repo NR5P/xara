@@ -33,6 +33,10 @@ use super::{Audio, BLOCK, DeviceList, RATE, STALL, capture_only, remaining};
 /// The device buffer WASAPI is asked for, in 100 ns units: 40 ms (playback keeps less of it
 /// queued; see `render_target`).
 const BUFFER_HNS: i64 = 400_000;
+/// A virtual cable buffers audio between its two ends, and WASAPI's stream latency doesn't
+/// include it: 25 ms per end, measured with VB-Audio's cables (two xaras over two cables
+/// linked on the first call only with 50 ms more allowed for each).
+const VIRTUAL_CABLE: usize = RATE as usize * 25 / 1000;
 const TX_TARGET: usize = 2 * BLOCK;
 const RX_LIMIT: usize = 2 * RATE as usize;
 /// How often a stream thread looks at the closed flag when its device is quiet, in ms.
@@ -326,7 +330,7 @@ fn run_render(sh: &Shared, c: &Client) -> windows::core::Result<()> {
 }
 
 impl Stream {
-    fn start(sh: &Arc<Shared>, id: Option<String>, input: bool, what: String) -> io::Result<Self> {
+    fn start(sh: &Arc<Shared>, id: Option<String>, input: bool, is_virtual: bool, what: String) -> io::Result<Self> {
         let (ready_tx, ready_rx) = mpsc::channel();
         let sh = sh.clone();
         let name = if input { "wasapi-capture" } else { "wasapi-render" };
@@ -351,7 +355,7 @@ impl Stream {
             }
         })?;
         match ready_rx.recv() {
-            Ok(Ok(latency)) => Ok(Self { thread: Some(thread), latency }),
+            Ok(Ok(latency)) => Ok(Self { thread: Some(thread), latency: latency + if is_virtual { VIRTUAL_CABLE } else { 0 } }),
             Ok(Err(e)) => {
                 let _ = thread.join();
                 Err(e)
@@ -385,14 +389,16 @@ impl WasapiIo {
         let shared = Arc::new(Shared::default());
         let mut io = Self { shared: shared.clone(), streams: Vec::new(), playing: play.is_some() };
         let rec_name = rec.as_ref().map_or("default".into(), |d| d.name.clone());
+        let rec_virtual = rec.as_ref().is_some_and(DeviceInfo::is_virtual);
         io.streams.push(
-            Stream::start(&shared, rec.map(|d| d.id), true, format!("capture {rec_name:?}"))
+            Stream::start(&shared, rec.map(|d| d.id), true, rec_virtual, format!("capture {rec_name:?}"))
                 .map_err(|e| io::Error::other(format!("capture {rec_name:?}: {e}")))?,
         );
         if let Some(d) = play {
             let what = format!("playback {:?}", d.name);
+            let virt = d.is_virtual();
             io.streams.push(
-                Stream::start(&shared, Some(d.id), false, what.clone())
+                Stream::start(&shared, Some(d.id), false, virt, what.clone())
                     .map_err(|e| io::Error::other(format!("{what}: {e}")))?,
             );
         }
