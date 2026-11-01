@@ -2,7 +2,7 @@
 # crates/xara-ffi as the Windows, Mac, iOS and Android apps do, with a window.
 [package]
 name = "xara-linux"
-version = "0.1.1"
+version = "0.1.2"
 edition = "2024"
 rust-version = "1.85"
 publish = false

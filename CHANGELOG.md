@@ -1,6 +1,6 @@
 # Changelog
 
-## unreleased
+## 0.1.2
 
 - BUSY no longer trips on plain noise when the radio's passband slopes: the
   tone detector learns the receiver's noise shape while the channel is clear
