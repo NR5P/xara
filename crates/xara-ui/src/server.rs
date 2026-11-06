@@ -24,7 +24,9 @@ pub(crate) const MAX_PENDING: usize = 32;
 const MAX_REQUEST: usize = 8192;
 const MAX_FRAME: usize = 4096;
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(5);
-const KEEPALIVE_TICKS: u32 = 20;
+// Pings go out by the clock, not by counting ticks: a slow or throttled hub stretches its ticks, and
+// pings that stretched past WS_IDLE would cut off a live page.
+const KEEPALIVE: Duration = Duration::from_secs(2);
 pub const WS_IDLE: Duration = Duration::from_secs(6);
 pub const TOKEN_FILE: &str = "ui-token";
 const ACCEPT_BACKOFF: Duration = Duration::from_millis(100);
@@ -329,7 +331,7 @@ fn hub(
     let mut history: VecDeque<String> = VecDeque::new();
     let mut audio = Audio { wf: Waterfall::new(info.span_hz), wanted: false, rows: Vec::new() };
     let mut next = Instant::now() + TICK;
-    let mut ticks = 0u32;
+    let mut pinged = Instant::now();
     loop {
         match msgs.recv_timeout(next.saturating_duration_since(Instant::now())) {
             Ok(Msg::Waterfall(id, on)) => {
@@ -393,11 +395,14 @@ fn hub(
         history.drain(..excess);
         batch.extend(src.status());
         let rows = audio.frames(&mut src);
-        ticks = (ticks + 1) % KEEPALIVE_TICKS;
+        let ping = now.duration_since(pinged) >= KEEPALIVE;
+        if ping {
+            pinged = now;
+        }
         let (kept, gone) = clients.into_iter().partition(|c| {
             batch.iter().all(|m| c.send(m))
                 && (!c.waterfall || rows.iter().all(|r| c.send_binary(r)))
-                && (ticks != 0 || c.ping())
+                && (!ping || c.ping())
         });
         clients = kept;
         gone.iter().for_each(|c| c.w.close());
