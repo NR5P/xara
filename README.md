@@ -28,6 +28,10 @@ to transmit, add `--radio` and `--ptt` flags.
 
 ## building
 
+the full guide to building every part of this fork by hand, checking it, releasing it,
+syncing with upstream x0rro/xara and how OpenSlot builds from it is
+[docs/building-and-releasing.md](docs/building-and-releasing.md).
+
 install deps:
 
     apt install libpulse-dev libasound2-dev
