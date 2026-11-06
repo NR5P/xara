@@ -352,6 +352,15 @@ fn lead_samples(a: &Args) -> usize {
     a.timing.lead.as_millis() as usize * (audio::RATE / 1000) as usize
 }
 
+/// How long the transmitter stays keyed after the audio ends: the peer's reply comes back that
+/// much later, so the reply window is widened to match. VOX, and no PTT at all, have no tail.
+fn tail_samples(a: &Args) -> i64 {
+    match a.ptt {
+        None | Some(PttSpec::Vox) => 0,
+        Some(_) => (a.timing.tail.as_millis() as usize * (audio::RATE / 1000) as usize) as i64,
+    }
+}
+
 fn state_dir(a: &Args) -> Option<PathBuf> {
     let env = std::env::var("STATE_DIRECTORY").ok();
     let dir = a.state_dir.clone().or_else(|| env.and_then(|e| e.split(':').next().map(String::from)))?;
@@ -518,7 +527,12 @@ fn run(
     }
     let latency =
         (a.audio_latency + io.output_latency()).as_millis() as usize * (audio::RATE / 1000) as usize + backend;
-    let opts = Options { drive_db: a.drive_db, tx_latency: (lead_samples(a) + latency) as i64 };
+    let opts = Options {
+        drive_db: a.drive_db,
+        tx_latency: (lead_samples(a) + latency) as i64,
+        rx_lag: 0,
+        ptt_tail: tail_samples(a),
+    };
     let host = Host::bind(&a.addr, a.port)?;
     let mode = match a.fm {
         Some(bw) => format!("FM {bw:?}"),
@@ -1043,6 +1057,17 @@ mod tests {
         assert_eq!((a.call.as_str(), a.radio, a.quiet, a.ui.port), ("N2CALL", true, false, Some(8080)));
         assert_eq!(a.ui.hosts, ["a.lan", "b.lan"]);
         std::fs::remove_dir_all(p.parent().unwrap()).unwrap();
+    }
+
+    #[test]
+    fn the_ptt_tail_widens_the_reply_window_only_when_xara_keys_the_radio() {
+        let tail = |s: &str| {
+            tail_samples(&parse(&argv(&format!("--call N2CALL --capture c --playback p {s}"))).unwrap().unwrap())
+        };
+        assert_eq!(tail(""), 0);
+        assert_eq!(tail("--radio --ptt vox --ptt-tail-ms 250"), 0);
+        assert_eq!(tail("--radio --ptt rigctld --ptt-tail-ms 250"), 250 * 48);
+        assert_eq!(tail("--radio --ptt rigctld"), 100 * 48);
     }
 
     #[test]

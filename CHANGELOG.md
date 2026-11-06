@@ -2,6 +2,13 @@
 
 ## 0.1.2
 
+- from upstream xara 0.1.2 and 0.1.3: FM reply windows follow the last
+  few exchanges and widen after a missed reply, so a long idle stretch
+  (CMS forwarding) no longer stalls the link (x0rro/xara#20); the reply
+  window allows for `--ptt-tail-ms`, so a rig with a PTT tail no longer
+  misses the connect reply (x0rro/xara#28); a burst's trailing silence is
+  kept apart from its audio; faster modulators and FM OFDM search (sine
+  tables, a shared FFT plan, parallel catch-up), with identical output
 - BUSY no longer trips on plain noise when the radio's passband slopes: the
   tone detector learns the receiver's noise shape while the channel is clear
   and divides it out, so a strong bin on the loud side of the passband stops
