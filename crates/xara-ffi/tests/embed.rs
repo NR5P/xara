@@ -27,7 +27,9 @@ fn bad_options_stop_the_modem_with_status_2_and_one_runs_at_a_time() {
     }
     assert_eq!(m.stop(), 2);
 
-    let m = xara_ffi::start(args("--call N1CALL --capture c --playback p --list-devices")).unwrap();
+    // Listing the sound devices needs a sound server or card, which a CI machine may not have (and the
+    // listing then fails with status 1); the trusdx backend lists serial ports and needs neither.
+    let m = xara_ffi::start(args("--call N1CALL --capture c --playback p --audio trusdx --list-devices")).unwrap();
     assert!(xara_ffi::start(args("--version")).is_none() || !m.running());
     assert_eq!(m.stop(), 0);
 }
