@@ -679,6 +679,7 @@ fn pump(
             let forced = ptt.as_ref().is_some_and(PttCtl::forced_off);
             tx.process(&mut out, forced);
             sent.iter_mut().zip(&out).for_each(|(s, &v)| *s = audio::quantize(v));
+            io.keyed(keyed);
             io.write(&sent)?;
             if let Some(r) = rec.as_deref_mut() {
                 r.push(&rx, &sent, record::ptt(keyed, forced, tuning));

@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+- Windows and Mac/iPhone audio: a loop turn that runs long (decoding a big
+  frame) no longer cuts the audio still coming in. Playback runs dry for it,
+  and that used to be made up by dropping captured audio, which mostly lost
+  the second frame of a double frame; it is now made up from the silence
+  xara writes, and from capture only while transmitting. Against VARA FM
+  4.4.1 (registered, over virtual cables), with VARA calling xara: Narrow
+  6,139 / 871 bps each way before, 8,491 / 8,175 after (VARA to VARA 9,275 /
+  8,192); Wide 8,549 / 513 before, 15,925 / 11,593 after (VARA to VARA
+  16,781 / 12,940). VARA HF timings are unchanged
+
 ## 0.1.2
 
 - BUSY no longer trips on plain noise when the radio's passband slopes: the

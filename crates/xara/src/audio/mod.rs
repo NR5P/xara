@@ -58,6 +58,63 @@ pub trait Audio {
     fn latency(&self) -> usize {
         0
     }
+
+    /// Whether the block about to be written goes out keyed (the modem is transmitting, so
+    /// what capture hears doesn't matter). Said before each write.
+    fn keyed(&mut self, _on: bool) {}
+}
+
+/// Owed silence beyond this (100 ms) is made up from capture even while the modem may be
+/// listening, so a playback clock that runs fast can't add delay without bound.
+const OWED_LIMIT: usize = RATE as usize / 10;
+
+/// Silence playback filled in when it ran dry, for the backends that keep capture and
+/// playback in lockstep (WASAPI, CoreAudio). Everything written after it reaches the air that
+/// much later than the modem allows for, so it has to be made up. Dropping captured audio
+/// does it, but a loop turn that runs long (decoding a big frame takes tens of ms) mostly
+/// lands while a frame is still coming in: cutting that audio loses the frame (the second
+/// of a double frame), and a peer that sees frames lost stops raising the speed. So it is
+/// made up from silence the modem writes, where there is a block to spare in the queue;
+/// from capture only while transmitting (nothing to hear), or once too much is owed.
+#[cfg_attr(not(any(coreaudio, wasapi)), allow(dead_code))]
+#[derive(Debug, Default)]
+pub(crate) struct Owed {
+    samples: usize,
+    /// The modem is transmitting (see `Audio::keyed`).
+    sending: bool,
+}
+
+#[cfg_attr(not(any(coreaudio, wasapi)), allow(dead_code))]
+impl Owed {
+    pub(crate) fn ran_dry(&mut self, n: usize, limit: usize) {
+        self.samples = (self.samples + n).min(limit);
+    }
+
+    pub(crate) fn keyed(&mut self, on: bool) {
+        self.sending = on;
+    }
+
+    /// How many samples to take off the end of the playback queue, which has just had `x`
+    /// added and now holds `queued`: silence written unkeyed only (a frame has quiet spells
+    /// of its own), and never below a block.
+    pub(crate) fn take_from_playback(&mut self, x: &[i16], queued: usize) -> usize {
+        if self.sending || x.iter().any(|&v| v != 0) {
+            return 0;
+        }
+        let n = self.samples.min(x.len()).min(queued.saturating_sub(BLOCK));
+        self.samples -= n;
+        n
+    }
+
+    /// How many of the `spare` captured samples beyond the next block to drop.
+    pub(crate) fn take_from_capture(&mut self, spare: usize) -> usize {
+        if !self.sending && self.samples < OWED_LIMIT {
+            return 0;
+        }
+        let n = self.samples.min(spare);
+        self.samples -= n;
+        n
+    }
 }
 
 pub fn sample(v: i16) -> f64 {
@@ -249,6 +306,49 @@ pub fn open_capture(b: Backend, capture: &str) -> io::Result<Box<dyn Audio>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn owed_silence_comes_out_of_silence_while_listening() {
+        let (quiet, sound) = ([0i16; BLOCK], [1i16; BLOCK]);
+        let mut o = Owed::default();
+        o.ran_dry(4 * BLOCK, 2 * RATE as usize);
+        // Listening: captured audio is never cut, however much is spare.
+        assert_eq!(o.take_from_capture(10 * BLOCK), 0);
+        // Silence written comes off the queue, keeping a block queued.
+        assert_eq!(o.take_from_playback(&quiet, BLOCK), 0);
+        assert_eq!(o.take_from_playback(&quiet, 2 * BLOCK), BLOCK);
+        assert_eq!(o.take_from_playback(&quiet, 3 * BLOCK), BLOCK);
+        assert_eq!(o.take_from_playback(&sound, 3 * BLOCK), 0);
+        assert_eq!(o.samples, 2 * BLOCK);
+        // Transmitting: nothing written is dropped, quiet spells in a frame included;
+        // capture makes up the rest.
+        o.keyed(true);
+        assert_eq!(o.take_from_playback(&quiet, 3 * BLOCK), 0);
+        assert_eq!(o.take_from_capture(BLOCK / 2), BLOCK / 2);
+        assert_eq!(o.take_from_capture(2 * BLOCK), 3 * BLOCK / 2);
+        assert_eq!(o.samples, 0);
+    }
+
+    #[test]
+    fn owed_silence_is_made_up_from_capture_at_once_while_keyed() {
+        let mut o = Owed::default();
+        o.keyed(true);
+        o.ran_dry(BLOCK, 2 * RATE as usize);
+        assert_eq!(o.take_from_capture(BLOCK / 2), BLOCK / 2);
+        assert_eq!(o.take_from_capture(BLOCK), BLOCK / 2);
+        assert_eq!(o.samples, 0);
+    }
+
+    #[test]
+    fn too_much_owed_comes_out_of_capture_even_while_listening() {
+        let mut o = Owed::default();
+        o.ran_dry(OWED_LIMIT - 1, 2 * RATE as usize);
+        assert_eq!(o.take_from_capture(RATE as usize), 0);
+        o.ran_dry(1, 2 * RATE as usize);
+        assert_eq!(o.take_from_capture(RATE as usize), OWED_LIMIT);
+        o.ran_dry(5 * RATE as usize, 2 * RATE as usize);
+        assert_eq!(o.samples, 2 * RATE as usize, "capped");
+    }
 
     #[test]
     fn samples_convert_at_the_device_boundary() {
