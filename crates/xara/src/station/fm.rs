@@ -48,6 +48,7 @@ fn bitrate(bw: FmBandwidth, record: Record, tx: bool) -> Report {
 
 impl Station {
     pub fn new(cfg: fm::Config, opts: Options) -> Self {
+        xara_phy::fm::code::warm();
         let bw = cfg.bw;
         let mut s = Self {
             rng: XorShift::new(cfg.seed.wrapping_mul(SEED_MIX)),
@@ -109,8 +110,7 @@ impl Station {
             let rng = &mut self.rng;
             let mut r = |n: u32| rng.below(n);
             let x = self.modm.transmission(Record::Broadcast, 0, &[f], IDLE_BEACON_LEAD_IN, opt, &mut r);
-            let mut samples: Vec<f64> = x.iter().map(|&v| quantise(v)).collect();
-            samples.resize(samples.len() + if i + 1 == n { DATA_OVERHANG } else { FRAGMENT_GAP }, 0.0);
+            let tail = if i + 1 == n { DATA_OVERHANG } else { FRAGMENT_GAP };
             let mut keyed = vec![
                 Report::Host(HostEvent::Pending),
                 bitrate(bw, Record::Broadcast, true),
@@ -119,7 +119,7 @@ impl Station {
             if i == 0 {
                 self.c.reports.extend(keyed.drain(..));
             }
-            self.c.tx.push(samples, self.c.now, keyed, Kind::Fragment { last: i + 1 == n });
+            self.c.tx.push(quantised(x), tail, self.c.now, keyed, Kind::Fragment { last: i + 1 == n });
         }
     }
 
@@ -233,7 +233,7 @@ impl Station {
         }
     }
 
-    fn render_digi(&mut self, t: &DigiTx) -> Vec<f64> {
+    fn render_digi(&mut self, t: &DigiTx) -> (Vec<f64>, usize) {
         let d = self.c.opts.drive_db;
         let (x, tail) = match t {
             DigiTx::Ctrl { code, lead, side } => {
@@ -252,9 +252,7 @@ impl Station {
                 (self.modm.transmission(*record, key, &[frame.as_slice()], *lead, opt, &mut r), DATA_OVERHANG)
             }
         };
-        let mut s: Vec<f64> = x.iter().map(|&v| quantise(v)).collect();
-        s.resize(s.len() + tail, 0.0);
-        s
+        (quantised(x), tail)
     }
 
     fn host(&mut self, h: HostEvent) {
@@ -273,7 +271,7 @@ impl Station {
         }
     }
 
-    fn render(&mut self, t: &fm::Tx) -> (Vec<f64>, Vec<Report>) {
+    fn render(&mut self, t: &fm::Tx) -> (Vec<f64>, usize, Vec<Report>) {
         let d = self.c.opts.drive_db;
         let mut keyed = Vec::new();
         let (x, tail) = match t {
@@ -296,9 +294,7 @@ impl Station {
                 (self.modm.transmission(*record, key, &refs, *lead, opt, &mut r), DATA_OVERHANG)
             }
         };
-        let mut s: Vec<f64> = x.iter().map(|&v| quantise(v)).collect();
-        s.resize(s.len() + tail, 0.0);
-        (s, keyed)
+        (quantised(x), tail, keyed)
     }
 }
 
@@ -314,7 +310,7 @@ impl TxFront for Station {
                 self.drain_at(end);
             }
             Kind::Session => {
-                self.c.session.on_tx_done(heard);
+                self.c.session.on_tx_done(heard + self.c.opts.ptt_tail);
                 self.drain_at(end);
             }
             Kind::Announce | Kind::Fragment { .. } => {}
@@ -398,8 +394,8 @@ impl Modem for Station {
             self.c.reports.push_back(Report::Trace(format!("{what} {:?}", self.c.session.state())));
             self.c.tx.stop_tune();
             let earliest = self.c.tx.next_start(now);
-            let (samples, keyed) = self.render(&t);
-            self.c.tx.push(samples, earliest, keyed, Kind::Session);
+            let (samples, tail, keyed) = self.render(&t);
+            self.c.tx.push(samples, tail, earliest, keyed, Kind::Session);
         }
         while let Some(o) = self.digi.pop() {
             match o {
@@ -413,8 +409,8 @@ impl Modem for Station {
                     self.c.reports.push_back(Report::Trace(what));
                     self.c.tx.stop_tune();
                     let earliest = self.c.tx.next_start(now);
-                    let samples = self.render_digi(&t);
-                    self.c.tx.push(samples, earliest, Vec::new(), Kind::Digi);
+                    let (samples, tail) = self.render_digi(&t);
+                    self.c.tx.push(samples, tail, earliest, Vec::new(), Kind::Digi);
                 }
                 DigiOutput::Listen(l) => self.apply_digi(l),
                 DigiOutput::Host(h) => self.host(h),
@@ -569,6 +565,11 @@ impl Arq for fm::Session {
     fn drop_link(&mut self) {
         fm::Session::drop_link(self)
     }
+}
+
+fn quantised(mut x: Vec<f64>) -> Vec<f64> {
+    x.iter_mut().for_each(|v| *v = quantise(*v));
+    x
 }
 
 fn level_note(record: Record, frame: &[u8], vias: bool) -> String {
