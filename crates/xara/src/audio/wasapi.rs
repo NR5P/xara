@@ -28,7 +28,7 @@ use windows::Win32::System::Com::{
 use windows::Win32::System::Threading::{AvSetMmThreadCharacteristicsW, CreateEventW, WaitForSingleObject};
 use windows::core::{HSTRING, w};
 
-use super::{Audio, BLOCK, DeviceList, RATE, STALL, capture_only, remaining};
+use super::{Audio, BLOCK, DeviceList, Owed, RATE, STALL, capture_only, remaining};
 
 /// The device buffer WASAPI is asked for, in 100 ns units: 40 ms (playback keeps less of it
 /// queued; see `render_target`).
@@ -48,7 +48,8 @@ struct State {
     tx: VecDeque<i16>,
     started: bool,
     flush: bool,
-    skip: usize,
+    /// Silence playback filled in that hasn't been made up yet (see `Owed`).
+    owed: Owed,
     failed: Option<String>,
 }
 
@@ -315,7 +316,7 @@ fn run_render(sh: &Shared, c: &Client) -> windows::core::Result<()> {
             }
             out[n..].fill(0);
             if st.started {
-                st.skip = (st.skip + out.len() - n).min(RX_LIMIT);
+                st.owed.ran_dry(out.len() - n, RX_LIMIT);
             } else {
                 st.started = true;
                 st.flush = true;
@@ -426,6 +427,10 @@ impl Audio for WasapiIo {
         self.streams.iter().map(|s| s.latency).sum::<usize>() + queue
     }
 
+    fn keyed(&mut self, on: bool) {
+        self.shared.lock().owed.keyed(on);
+    }
+
     fn read(&mut self, x: &mut [i16]) -> io::Result<()> {
         let until = Instant::now() + STALL;
         let mut st = self.shared.lock();
@@ -440,15 +445,14 @@ impl Audio for WasapiIo {
         let ms = |n: usize| n * 1000 / RATE as usize;
         if st.flush {
             st.flush = false;
-            st.skip = 0;
+            st.owed = Owed::default();
             st.rx.drain(..spare);
             if spare >= BLOCK {
                 crate::say!("playback started {} ms after capture; capture skipped ahead to match", ms(spare));
             }
-        } else if st.skip > 0 {
-            let n = st.skip.min(spare);
+        } else {
+            let n = st.owed.take_from_capture(spare);
             st.rx.drain(..n);
-            st.skip -= n;
             if n >= 5 * BLOCK {
                 crate::say!("playback ran dry for {} ms; capture skipped ahead to match", ms(n));
             }
@@ -470,6 +474,9 @@ impl Audio for WasapiIo {
             return Err(io::Error::other(why.clone()));
         }
         st.tx.extend(x);
+        let queued = st.tx.len();
+        let n = st.owed.take_from_playback(x, queued);
+        st.tx.truncate(queued - n);
         while st.tx.len() > TX_TARGET {
             let wait = remaining(until, "playback (device not draining)")?;
             st = self.shared.moved.wait_timeout(st, wait).unwrap_or_else(PoisonError::into_inner).0;

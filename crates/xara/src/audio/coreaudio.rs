@@ -7,7 +7,7 @@ use std::time::Instant;
 use super::coreaudio_ffi::{
     self as ffi, DeviceInfo, Queue, QueueBuffer, QueueRef, StreamFormat, TRANSPORT_AGGREGATE, TRANSPORT_VIRTUAL,
 };
-use super::{Audio, BLOCK, DeviceList, RATE, STALL, capture_only, remaining};
+use super::{Audio, BLOCK, DeviceList, Owed, RATE, STALL, capture_only, remaining};
 
 const RX_BUFFERS: usize = 4;
 const TX_BUFFERS: usize = 3;
@@ -17,8 +17,9 @@ const RX_LIMIT: usize = 2 * RATE as usize;
 
 /// Reads and writes go in lockstep and the modem takes sample k of each as the same instant, so
 /// capture has to stay as far behind real time as playback does. Two things put playback further
-/// behind, and capture skips the same audio to match: the device's start (capture runs, and
-/// piles up, before playback does) and playback running dry (silence the modem never wrote).
+/// behind, and the same audio is skipped to match: the device's start (capture runs, and
+/// piles up, before playback does; capture skips it) and playback running dry (silence the
+/// modem never wrote; see `Owed` for where that is made up).
 /// Without this, every reply reached the modem late by the difference, after it had stopped
 /// listening for it. ALSA and AAudio read the device directly and have no such queue.
 #[derive(Default)]
@@ -30,8 +31,8 @@ struct State {
     started: bool,
     /// Drop what capture holds beyond the next block: playback has just started.
     flush: bool,
-    /// Captured samples to drop: the silence playback filled in.
-    skip: usize,
+    /// The silence playback filled in, still to be made up.
+    owed: Owed,
     /// Playback in stereo, with PTT's tone on the right (`super::tone`); None = mono.
     stereo: Option<super::tone::Stereo>,
     mono: Vec<i16>,
@@ -97,7 +98,7 @@ extern "C" fn drained(user: *mut c_void, q: QueueRef, b: *mut QueueBuffer) {
             }
         }
         if st.started {
-            st.skip = (st.skip + frames - n).min(RX_LIMIT);
+            st.owed.ran_dry(frames - n, RX_LIMIT);
         } else if st.armed {
             st.started = true;
             st.flush = true;
@@ -242,6 +243,10 @@ impl CoreAudioIo {
 }
 
 impl Audio for CoreAudioIo {
+    fn keyed(&mut self, on: bool) {
+        self.shared.lock().owed.keyed(on);
+    }
+
     fn read(&mut self, x: &mut [i16]) -> io::Result<()> {
         let until = Instant::now() + STALL;
         let mut st = self.shared.lock();
@@ -254,15 +259,14 @@ impl Audio for CoreAudioIo {
         let ms = |n: usize| n * 1000 / RATE as usize;
         if st.flush {
             st.flush = false;
-            st.skip = 0;
+            st.owed = Owed::default();
             st.rx.drain(..spare);
             if spare >= BLOCK {
                 crate::say!("playback started {} ms after capture; capture skipped ahead to match", ms(spare));
             }
-        } else if st.skip > 0 {
-            let n = st.skip.min(spare);
+        } else {
+            let n = st.owed.take_from_capture(spare);
             st.rx.drain(..n);
-            st.skip -= n;
             if n >= 5 * BLOCK {
                 crate::say!("playback ran dry for {} ms; capture skipped ahead to match", ms(n));
             }
@@ -281,6 +285,9 @@ impl Audio for CoreAudioIo {
         let until = Instant::now() + STALL;
         let mut st = self.shared.lock();
         st.tx.extend(x);
+        let queued = st.tx.len();
+        let n = st.owed.take_from_playback(x, queued);
+        st.tx.truncate(queued - n);
         while st.tx.len() > TX_TARGET {
             let wait = remaining(until, "playback (device not draining)")?;
             st = self.shared.moved.wait_timeout(st, wait).unwrap_or_else(PoisonError::into_inner).0;
