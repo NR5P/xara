@@ -55,14 +55,19 @@ pub struct StreamFormat {
 
 impl StreamFormat {
     pub fn s16_mono(rate: u32) -> Self {
+        Self::s16(rate, 1)
+    }
+
+    /// Interleaved 16-bit samples, `channels` to a frame.
+    pub fn s16(rate: u32, channels: u32) -> Self {
         Self {
             sample_rate: f64::from(rate),
             format_id: FORMAT_LINEAR_PCM,
             format_flags: PCM_SIGNED_INTEGER | PCM_PACKED,
-            bytes_per_packet: 2,
+            bytes_per_packet: 2 * channels,
             frames_per_packet: 1,
-            bytes_per_frame: 2,
-            channels_per_frame: 1,
+            bytes_per_frame: 2 * channels,
+            channels_per_frame: channels,
             bits_per_channel: 16,
             reserved: 0,
         }

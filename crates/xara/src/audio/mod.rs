@@ -12,6 +12,7 @@ mod coreaudio_ffi;
 pub mod pulse;
 #[cfg(pulse)]
 mod pulse_ffi;
+pub mod tone;
 pub mod trusdx;
 #[cfg(wasapi)]
 pub mod wasapi;

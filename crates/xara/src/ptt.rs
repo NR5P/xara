@@ -28,6 +28,8 @@ pub enum PttSpec {
     Cm108Usb { vendor: u16, product: u16, gpio: u8 },
     Rigctld(String),
     Trusdx,
+    /// A tone on the right channel (Hz), for interfaces that key from audio (Digirig Lite)
+    Tone(u32),
 }
 
 pub const RIGCTLD_DEFAULT: &str = "127.0.0.1:4532";
@@ -46,6 +48,11 @@ impl PttSpec {
         };
         match kind {
             "vox" if rest.is_empty() => Ok(Self::Vox),
+            "tone" if rest.is_empty() => Ok(Self::Tone(crate::audio::tone::DEFAULT_HZ)),
+            "tone" => match rest.parse::<u32>() {
+                Ok(hz) if (300..=20000).contains(&hz) => Ok(Self::Tone(hz)),
+                _ => Err(format!("--ptt tone:{rest}: the tone is 300 to 20000 Hz, e.g. tone:1000")),
+            },
             "rts" => path("rts").map(Self::Rts),
             "dtr" => path("dtr").map(Self::Dtr),
             "cm108" if !rest.starts_with('/') => {
@@ -74,7 +81,7 @@ impl PttSpec {
             "trusdx" if rest.is_empty() => Ok(Self::Trusdx),
             "rigctld" => Ok(Self::Rigctld(if rest.is_empty() { RIGCTLD_DEFAULT.into() } else { rest.into() })),
             _ => Err(format!(
-                "--ptt {s:?}: expected vox, rts:DEV, dtr:DEV, cm108:DEV[:GPIO], cm108:VID:PID[:GPIO] rigctld[:HOST:PORT] or trusdx"
+                "--ptt {s:?}: expected vox, rts:DEV, dtr:DEV, cm108:DEV[:GPIO], cm108:VID:PID[:GPIO] rigctld[:HOST:PORT], trusdx or tone[:HZ]"
             )),
         }
     }
@@ -99,6 +106,7 @@ impl PttSpec {
             }
             Self::Rigctld(a) => Box::new(Rigctld::open(a)?),
             Self::Trusdx => Box::new(Trusdx),
+            Self::Tone(hz) => Box::new(Tone(*hz)),
         })
     }
 }
@@ -112,6 +120,20 @@ impl Ptt for Vox {
 
     fn describe(&self) -> String {
         "VOX (no PTT line)".into()
+    }
+}
+
+/// Keys the radio with a tone on the right channel (see `audio::tone`).
+pub struct Tone(u32);
+
+impl Ptt for Tone {
+    fn set(&mut self, on: bool) -> io::Result<()> {
+        crate::audio::tone::set_keyed(on);
+        Ok(())
+    }
+
+    fn describe(&self) -> String {
+        format!("a {} Hz tone on the right channel", self.0)
     }
 }
 

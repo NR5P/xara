@@ -51,7 +51,7 @@ fn check(what: &str, r: Result) -> io::Result<i32> {
 }
 
 /// One open AAudio stream of mono 16-bit samples.
-pub struct Stream(NonNull<c_void>);
+pub struct Stream(NonNull<c_void>, i32);
 
 // SAFETY: an AAudio stream may be used from any one thread at a time.
 unsafe impl Send for Stream {}
@@ -64,8 +64,13 @@ impl Drop for Stream {
 }
 
 impl Stream {
-    /// Opens a stream on `device` (0 for the system's choice) and starts it.
+    /// Opens a mono stream on `device` (0 for the system's choice) and starts it.
     pub fn open(direction: i32, device: i32, rate: u32, preset: i32) -> io::Result<Self> {
+        Self::open_channels(direction, device, rate, preset, 1)
+    }
+
+    /// The same with `channels` interleaved (2: PTT by tone).
+    pub fn open_channels(direction: i32, device: i32, rate: u32, preset: i32, channels: i32) -> io::Result<Self> {
         let what = if direction == DIRECTION_INPUT { "opening capture" } else { "opening playback" };
         let mut b = null_mut();
         // SAFETY: the builder is used only between its creation and deletion below.
@@ -74,7 +79,7 @@ impl Stream {
             AAudioStreamBuilder_setDirection(b, direction);
             AAudioStreamBuilder_setDeviceId(b, device);
             AAudioStreamBuilder_setSampleRate(b, rate as i32);
-            AAudioStreamBuilder_setChannelCount(b, 1);
+            AAudioStreamBuilder_setChannelCount(b, channels);
             AAudioStreamBuilder_setFormat(b, FORMAT_PCM_I16);
             AAudioStreamBuilder_setSharingMode(b, SHARING_SHARED);
             AAudioStreamBuilder_setPerformanceMode(b, PERFORMANCE_NONE);
@@ -87,13 +92,13 @@ impl Stream {
             let r = AAudioStreamBuilder_openStream(b, &mut s);
             AAudioStreamBuilder_delete(b);
             check(what, r)?;
-            let s = Stream(NonNull::new(s).ok_or_else(|| io::Error::other(format!("{what}: no stream")))?);
+            let s = Stream(NonNull::new(s).ok_or_else(|| io::Error::other(format!("{what}: no stream")))?, channels);
             let p = s.0.as_ptr();
             let (got_rate, ch, fmt) =
                 (AAudioStream_getSampleRate(p), AAudioStream_getChannelCount(p), AAudioStream_getFormat(p));
-            if got_rate != rate as i32 || ch != 1 || fmt != FORMAT_PCM_I16 {
+            if got_rate != rate as i32 || ch != channels || fmt != FORMAT_PCM_I16 {
                 return Err(io::Error::other(format!(
-                    "{what}: the device gave {got_rate} Hz, {ch} channel(s), format {fmt} instead of {rate} Hz mono 16-bit"
+                    "{what}: the device gave {got_rate} Hz, {ch} channel(s), format {fmt} instead of {rate} Hz, {channels} channel(s) 16-bit"
                 )));
             }
             check(what, AAudioStream_requestStart(p))?;
@@ -122,10 +127,12 @@ impl Stream {
         check("capture", r).map(|n| n as usize)
     }
 
-    /// Blocks until all of `x` is queued or `timeout_ns` passes; returns the frames written.
+    /// Blocks until all of `x` (interleaved frames) is queued or `timeout_ns` passes; returns
+    /// the frames written.
     pub fn write(&self, x: &[i16], timeout_ns: i64) -> io::Result<usize> {
-        // SAFETY: x holds x.len() mono frames.
-        let r = unsafe { AAudioStream_write(self.0.as_ptr(), x.as_ptr().cast(), x.len() as i32, timeout_ns) };
+        // SAFETY: x holds x.len() / channels frames.
+        let frames = x.len() as i32 / self.1;
+        let r = unsafe { AAudioStream_write(self.0.as_ptr(), x.as_ptr().cast(), frames, timeout_ns) };
         check("playback", r).map(|n| n as usize)
     }
 }

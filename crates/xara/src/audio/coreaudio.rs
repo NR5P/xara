@@ -32,6 +32,9 @@ struct State {
     flush: bool,
     /// Captured samples to drop: the silence playback filled in.
     skip: usize,
+    /// Playback in stereo, with PTT's tone on the right (`super::tone`); None = mono.
+    stereo: Option<super::tone::Stereo>,
+    mono: Vec<i16>,
 }
 
 #[derive(Default)]
@@ -75,19 +78,31 @@ extern "C" fn drained(user: *mut c_void, q: QueueRef, b: *mut QueueBuffer) {
         let sh = &*user.cast::<Shared>();
         let buf = &mut *b;
         let out = std::slice::from_raw_parts_mut(buf.data.cast::<i16>(), buf.capacity as usize / 2);
-        let mut st = sh.lock();
-        let n = st.tx.len().min(out.len());
-        for (o, v) in out.iter_mut().zip(st.tx.drain(..n)) {
-            *o = v;
+        let mut guard = sh.lock();
+        let st = &mut *guard;
+        let frames = if st.stereo.is_some() { out.len() / 2 } else { out.len() };
+        let n = st.tx.len().min(frames);
+        match &mut st.stereo {
+            Some(stereo) => {
+                st.mono.clear();
+                st.mono.extend(st.tx.drain(..n));
+                st.mono.resize(frames, 0);
+                stereo.fill(&st.mono, out);
+            }
+            None => {
+                for (o, v) in out.iter_mut().zip(st.tx.drain(..n)) {
+                    *o = v;
+                }
+                out[n..].fill(0);
+            }
         }
-        out[n..].fill(0);
         if st.started {
-            st.skip = (st.skip + out.len() - n).min(RX_LIMIT);
+            st.skip = (st.skip + frames - n).min(RX_LIMIT);
         } else if st.armed {
             st.started = true;
             st.flush = true;
         }
-        drop(st);
+        drop(guard);
         buf.size = buf.capacity;
         sh.moved.notify_all();
         let _ = ffi::enqueue(q, b);
@@ -202,11 +217,15 @@ impl CoreAudioIo {
         }
         let play = match &play_uid {
             Some(uid) => {
+                // PTT by tone: stereo, the tone on the right
+                let stereo = super::tone::enabled();
+                let channels = if stereo { 2 } else { 1 };
+                shared.lock().stereo = stereo.then(super::tone::Stereo::default);
                 // SAFETY: as for rec.
-                let p = unsafe { Queue::output(&fmt, drained, user)? };
+                let p = unsafe { Queue::output(&StreamFormat::s16(RATE, channels), drained, user)? };
                 p.set_device(uid)?;
                 for _ in 0..TX_BUFFERS {
-                    let b = p.allocate(bytes)?;
+                    let b = p.allocate(bytes * channels)?;
                     drained(user, p.raw(), b);
                 }
                 shared.lock().armed = true;

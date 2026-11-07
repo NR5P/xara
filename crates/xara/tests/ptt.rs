@@ -10,6 +10,11 @@ use xara::ptt::{Cm108, Event, Ptt, PttCtl, PttSpec, PttTiming, Rigctld, Serial, 
 #[test]
 fn ptt_spec_parse() {
     assert_eq!(PttSpec::parse("vox"), Ok(PttSpec::Vox));
+    assert_eq!(PttSpec::parse("tone"), Ok(PttSpec::Tone(1000)));
+    assert_eq!(PttSpec::parse("tone:2500"), Ok(PttSpec::Tone(2500)));
+    for bad in ["tone:50", "tone:30000", "tone:loud"] {
+        assert!(PttSpec::parse(bad).is_err(), "{bad}");
+    }
     // Serial ports are device paths on Unix and COM ports on Windows.
     let (acm, usb, bare) =
         if cfg!(windows) { ("COM3", "COM12", "ttyACM0") } else { ("/dev/ttyACM0", "/dev/ttyUSB1", "ttyACM0") };

@@ -224,6 +224,9 @@ summary of settings:
     --ptt cm108:VID:PID[:GPIO]  same, by hex USB id (macOS)
     --ptt rigctld[:HOST:PORT]   hamlib rigctld CAT on HOST:PORT
     --ptt trusdx                (tr)uSDX CAT, with --audio trusdx
+    --ptt tone[:HZ]             a tone on the right channel (default 1000 Hz), for
+                                interfaces that key from audio (Digirig Lite);
+                                macOS, iOS and Android
 
     --ptt-lead-ms N             PTT held for N ms before xmit (default: 0)
     --ptt-tail-ms N             PTT held for N ms after xmit (default: 100)

@@ -279,6 +279,9 @@ fn check(a: &Args) -> Result<(), String> {
         (true, false) if a.radio => return Err("--audio trusdx keys the radio over CAT: use --ptt trusdx".into()),
         _ => {}
     }
+    if matches!(a.ptt, Some(PttSpec::Tone(_))) && !matches!(a.audio, Backend::CoreAudio | Backend::AAudio) {
+        return Err("--ptt tone plays on Core Audio (macOS, iOS) or AAudio (Android) only".into());
+    }
     if a.timing.lead > Duration::from_secs(1) || a.timing.tail > Duration::from_secs(1) {
         return Err("--ptt-lead-ms and --ptt-tail-ms must be <= 1000".into());
     }
@@ -711,6 +714,11 @@ fn open_audio(
     error: &mut Option<String>,
 ) -> Result<(Args, Box<dyn Audio>), std::io::Error> {
     let devices = |k: &str| k == "capture" || k == "playback";
+    // (PTT by tone plays in stereo: set before the audio opens)
+    audio::tone::configure(match a.ptt {
+        Some(PttSpec::Tone(hz)) => Some(hz),
+        _ => None,
+    });
     match audio::open(a.audio, &a.capture, &a.playback, a.radio) {
         Ok(io) => Ok((a, io)),
         Err(e) if applied.is_some_and(|s| s.iter().any(|(k, _)| devices(k))) => {

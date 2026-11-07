@@ -50,21 +50,25 @@ fn capture(name: &str) -> io::Result<Stream> {
 pub struct AAudioIo {
     rec: Stream,
     play: Option<Stream>,
+    /// Playback in stereo with PTT's tone on the right (`super::tone`), and its buffer
+    stereo: Option<(super::tone::Stereo, Vec<i16>)>,
 }
 
 impl AAudioIo {
     pub fn open(capture_name: &str, playback: &str, radio: bool) -> io::Result<Self> {
         let id = check_playback(playback, radio)?;
-        let play = Stream::open(DIRECTION_OUTPUT, id, RATE, 0)?;
+        let stereo = super::tone::enabled();
+        let play = Stream::open_channels(DIRECTION_OUTPUT, id, RATE, 0, if stereo { 2 } else { 1 })?;
         if play.device() != id {
             return Err(io::Error::other(format!("playback {id}: Android opened device {} instead", play.device())));
         }
         play.limit_buffer(TX_BUFFER);
-        Ok(Self { rec: capture(capture_name)?, play: Some(play) })
+        let stereo = stereo.then(|| (super::tone::Stereo::default(), Vec::new()));
+        Ok(Self { rec: capture(capture_name)?, play: Some(play), stereo })
     }
 
     pub fn open_capture(capture_name: &str) -> io::Result<Self> {
-        Ok(Self { rec: capture(capture_name)?, play: None })
+        Ok(Self { rec: capture(capture_name)?, play: None, stereo: None })
     }
 }
 
@@ -82,7 +86,15 @@ impl Audio for AAudioIo {
 
     fn write(&mut self, x: &[i16]) -> io::Result<()> {
         let Some(play) = &self.play else { return Err(capture_only()) };
-        if play.write(x, nanos(STALL))? < x.len() {
+        let written = match &mut self.stereo {
+            Some((stereo, buf)) => {
+                buf.resize(2 * x.len(), 0);
+                stereo.fill(x, buf);
+                play.write(buf, nanos(STALL))?
+            }
+            None => play.write(x, nanos(STALL))?,
+        };
+        if written < x.len() {
             return Err(io::Error::new(io::ErrorKind::TimedOut, "playback (device not draining): timed out"));
         }
         Ok(())
