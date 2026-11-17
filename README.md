@@ -48,8 +48,8 @@ alternatively for a local setup you can do:
 ### Linux app
 
 for a window instead of the command line, `linux/` has a Linux app with the
-same modem and settings as the Windows and Mac apps (including *Registered
-(VARA licence)*), the link's live status (state, speed level, bitrate, S/N,
+same modem and settings as the Windows and Mac apps (including *High
+Speed*), the link's live status (state, speed level, bitrate, S/N,
 levels) and an entry in your applications menu; see
 [linux/README.md](linux/README.md):
 
@@ -286,7 +286,7 @@ options:
 ## registered mode
 
 if you have a registered copy of VARA, run with `xara --registered ...` (or
-`registered` in the config file, or turn on *Registered (VARA licence)* in the
+`registered` in the config file, or turn on *High Speed* in the
 web UI's settings) so links with other registered stations run at full speed.
 it is off unless you turn it on. the `registered` feature is built in by
 default; `--no-default-features --features pulse,alsa` leaves it out.
@@ -295,7 +295,7 @@ default; `--no-default-features --features pulse,alsa` leaves it out.
 
 with `--ui-control`, the web UI's settings card saves to the state directory
 and restarts xara, as the apps' settings do: call, bandwidth, audio devices,
-PTT timing, audio delay, *Registered (VARA licence)*, *Show other stations'
+PTT timing, audio delay, *High Speed*, *Show other stations'
 traffic* with *Every packet* and calls to name (HF), *Record received audio*
 and *Keep a debug log*. the last two write `xara-DATE-TIME.flac` and
 `debug.log` next to the settings file (`/var/lib/xara/STATION/` for the

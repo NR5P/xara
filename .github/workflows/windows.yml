@@ -1,0 +1,39 @@
+name: Windows build
+
+# Builds the Windows app (xara-app.exe) and the xara and xara-monitor commands on a
+# GitHub Windows machine, and keeps them as a downloadable zip on the run's page.
+# Start it from the Actions tab ("Run workflow") or with: gh workflow run windows.yml
+on:
+  workflow_dispatch:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: rustup toolchain install stable --profile minimal
+      - name: build the xara commands
+        run: cargo build --locked --release -p xara
+      - name: build the Windows app
+        run: cargo build --locked --release --manifest-path windows/Cargo.toml
+      - name: package
+        shell: pwsh
+        run: |
+          $out = "xara-windows"
+          New-Item -ItemType Directory -Force $out | Out-Null
+          Copy-Item windows\target\release\xara-app.exe $out
+          Copy-Item target\release\xara.exe, target\release\xara-monitor.exe $out
+          Copy-Item windows\README.md $out
+      - uses: actions/upload-artifact@v4
+        with:
+          name: xara-windows-x86_64
+          path: xara-windows
+          if-no-files-found: error

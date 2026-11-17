@@ -287,8 +287,7 @@ fun ModemScreen() {
             TextButton({ drive = (drive - 1).coerceAtLeast(-30) }, enabled = editable) { Text("−") }
             TextButton({ drive = (drive + 1).coerceAtMost(0) }, enabled = editable) { Text("+") }
         }
-        Toggle("Registered (VARA licence)", registered, editable) { registered = it }
-        Note("Only with a registered copy of VARA: higher speeds, and links at full speed with other registered stations.")
+        Toggle("High Speed", registered, editable) { registered = it }
 
         Section("Radio")
         Choice("Connection", Hookup.entries, hookup, { it.label }, editable) { hookup = it }

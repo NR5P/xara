@@ -275,11 +275,7 @@ impl App {
                         ui.add(egui::Slider::new(&mut s.drive_db, -30.0..=0.0).step_by(1.0).suffix(" dB"));
                         ui.end_row();
                     });
-                    ui.checkbox(&mut s.registered, "Registered (VARA licence)");
-                    note(
-                        ui,
-                        "Only with a registered copy of VARA: higher speeds, and links at full speed with other registered stations.",
-                    );
+                    ui.checkbox(&mut s.registered, "High Speed");
                 });
 
                 section(ui, "Audio and radio", |ui| {

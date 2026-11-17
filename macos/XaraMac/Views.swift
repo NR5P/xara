@@ -78,8 +78,7 @@ struct ModemView: View {
                         Text("\(Int(driveDb)) dB").monospacedDigit().frame(width: 50, alignment: .trailing)
                     }
                 }
-                Toggle("Registered (VARA licence)", isOn: $registered)
-                Text("Only with a registered copy of VARA: higher speeds, and links at full speed with other registered stations.").font(.caption).foregroundStyle(.secondary)
+                Toggle("High Speed", isOn: $registered)
             }
             .disabled(modem.running)
 

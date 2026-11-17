@@ -106,7 +106,7 @@
       <label>PTT lead (ms) <input name="ptt-lead-ms" type="number" min="0" max="1000" step="10"></label>
       <label>PTT tail (ms) <input name="ptt-tail-ms" type="number" min="0" max="1000" step="10"></label>
       <label>Audio delay (ms) <input name="audio-latency-ms" type="number" min="0" max="1000" step="50"></label>
-      <label>Registered (VARA licence)
+      <label>High Speed
         <select name="registered"><option value="">command line</option><option value="yes">on</option><option value="no">off</option></select>
       </label>
       <label id="set-monitor">Show other stations' traffic
@@ -133,8 +133,7 @@
     <p id="set-msg" class="hint"></p>
     <p class="hint">Empty fields use the command line (shown greyed). xara restarts only while idle, which takes a few
       seconds; if saved settings fail to start, it falls back to the command line and says so here.</p>
-    <p class="hint">Registered is for a user with a registered copy of VARA: links with other registered stations
-      run at full speed. Audio delay is the round trip in the audio path that xara does not add itself, such as
+    <p class="hint">Audio delay is the round trip in the audio path that xara does not add itself, such as
       network audio (two phones on their own speakers: about 500); leave it at 0 for a radio on a USB interface.</p>
     <p class="hint" id="set-monitor-hint">Showing other stations' traffic decodes VARA HF links between other
       stations, like VARA's monitor, and prints them with your own links' text to xara's output (journalctl -u

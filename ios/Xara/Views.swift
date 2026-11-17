@@ -51,8 +51,7 @@ struct ModemView: View {
                     Stepper(value: $driveDb, in: -30...0, step: 1) {
                         LabeledContent("TX drive", value: "\(Int(driveDb)) dB")
                     }
-                    Toggle("Registered (VARA licence)", isOn: $registered)
-                    Text("Only with a registered copy of VARA: higher speeds, and links at full speed with other registered stations.").font(.caption).foregroundStyle(.secondary)
+                    Toggle("High Speed", isOn: $registered)
                 }
                 .disabled(modem.running)
                 Section {

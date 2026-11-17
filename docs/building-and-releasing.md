@@ -93,7 +93,7 @@ Every app contains the same Rust modem. The apps don't copy it: their build comp
 
 The `registered` feature (registered VARA speeds) is built into all of these by default. It
 stays off at run time unless the user turns it on (`--registered`, or the app's
-*Registered (VARA licence)* switch).
+*High Speed* switch).
 
 ## 4. Building each part
 
